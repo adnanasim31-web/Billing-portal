@@ -1,7 +1,10 @@
 # MedBill RCM Suite
 
 Enterprise medical billing & revenue cycle management (RCM) SaaS platform.
-Built module by module - this is **Module 1: Authentication & User Management**.
+Built module by module. Shipped so far:
+
+- **Module 1: Authentication & User Management**
+- **Module 2: Patients**
 
 ## Architecture decision
 
@@ -295,6 +298,215 @@ middleware.ts               Session refresh + route protection
   the Client/Provider/Patient portals) reuses this same
   RLS-per-organization + service-layer + Zod-validated-API pattern - Module
   1 is the foundation the rest of the suite builds on.
+
+---
+
+# Module 2: Patients
+
+Patient registration, profile, insurance on file, documents, medical history,
+and notes - the foundational entity that Claims, Appointments, and
+Eligibility will all reference once those modules ship. The Claims,
+Balances, and Payment History tabs on the patient profile intentionally
+render an "upcoming module" placeholder rather than fake data.
+
+## 1. UI Design
+
+- **Patients list** (`/patients`): searchable, filterable `DataTable` (name/
+  MRN/email search, status filter) with server-side pagination, matching the
+  Module 1 card/table visual system.
+- **Register/Edit patient** (`/patients/new`, `/patients/[id]/edit`): a
+  sectioned form (Demographics / Contact / Address) sharing one
+  `PatientForm` component and Zod schema for both create and edit.
+- **Patient profile** (`/patients/[id]`): header with avatar, MRN, age, DOB,
+  status badge, and a tabbed workspace - Overview, Insurance, Documents,
+  Medical History, Notes, plus disabled-look placeholders for Claims and
+  Balances.
+
+## 2. Database Tables
+
+Added in `supabase/migrations/00000000000006_patients_schema.sql` and
+`00000000000007_patients_rls_storage.sql`:
+
+- `patients` - demographics, MRN (unique per org, format `MB-000001`),
+  guarantor self-reference, status.
+- `patient_insurance_policies` - primary/secondary/tertiary coverage; a
+  partial unique index (`WHERE is_active = true`) enforces at most one
+  active policy per rank per patient while preserving history.
+- `patient_documents` - metadata for files in the `patient-documents`
+  Supabase Storage bucket (private, 25MB limit, PDF/image/Word mime types
+  allow-listed).
+- `patient_medical_history` - unified condition/allergy/medication/surgery/
+  immunization timeline.
+- `patient_notes` - free-text notes (general/billing/clinical/collections),
+  pinnable.
+
+All five tables are organization-scoped and RLS-protected using the same
+`current_organization_id()` / `has_permission()` helpers from Module 1,
+gated behind the `patients.view` / `patients.manage` / `documents.view` /
+`documents.manage` permissions already seeded in Module 1's permission
+catalog - no new RBAC migration was needed.
+
+### Relationships
+
+```
+organizations 1---N patients
+patients 1---N patient_insurance_policies
+patients 1---N patient_documents
+patients 1---N patient_medical_history
+patients 1---N patient_notes --- profiles (author_id)
+patients 1---1 patients (guarantor_patient_id, self-referencing, nullable)
+```
+
+### Storage
+
+The `patient-documents` bucket uses the path convention
+`{organization_id}/{patient_id}/{uuid}-{filename}`, and its `storage.objects`
+RLS policies check `(storage.foldername(name))[1] = current_organization_id()`
+so a signed upload/download URL can never be reused across organizations.
+
+## 3. Models
+
+`src/types/database.types.ts` extended with `patients`,
+`patient_insurance_policies`, `patient_documents`, `patient_medical_history`,
+and `patient_notes` - including their FK `Relationships` metadata, which
+Postgrest's embedded-select type inference requires (e.g. `patient_notes`
+joined to `profiles` via `author_id` for the Notes tab's author name).
+
+## 4. Controllers (Route Handlers)
+
+`src/app/api/patients/**/route.ts` - 10 endpoints (see API table below),
+mirroring the Module 1 pattern: permission-checked, Zod-validated, thin.
+
+## 5. Services
+
+- `patient-service.ts` - MRN generation (sequential per org, retries on a
+  rare concurrent-registration collision), search/pagination, create/update.
+- `patient-insurance-service.ts` - list/add coverage; adding a new *active*
+  policy for a rank automatically deactivates the prior active one for that
+  rank so history is preserved without violating the partial unique index.
+- `patient-document-service.ts` - signed upload URL issuance, metadata
+  recording, signed download URL generation, delete (storage object + row).
+- `patient-history-service.ts` / `patient-notes-service.ts` - CRUD for the
+  medical history timeline and notes, including note pin/unpin.
+
+## 6. APIs
+
+| Method | URL                                              | Purpose                          |
+|--------|----------------------------------------------------|-----------------------------------|
+| GET    | `/api/patients`                                    | Search/paginate patients          |
+| POST   | `/api/patients`                                    | Register a patient (`patients.manage`) |
+| GET    | `/api/patients/:id`                                | Get a patient                     |
+| PATCH  | `/api/patients/:id`                                | Update a patient (`patients.manage`) |
+| GET/POST | `/api/patients/:id/insurance`                    | List/add insurance policies       |
+| DELETE | `/api/patients/:id/insurance/:policyId`            | Deactivate a policy               |
+| POST   | `/api/patients/:id/documents/upload-url`           | Issue a signed Storage upload URL |
+| GET/POST | `/api/patients/:id/documents`                    | List documents (with signed download URLs) / record uploaded metadata |
+| DELETE | `/api/patients/:id/documents/:documentId`          | Delete a document (storage + row) |
+| GET/POST | `/api/patients/:id/history`                      | List/add medical history entries  |
+| DELETE | `/api/patients/:id/history/:entryId`               | Delete a history entry            |
+| GET/POST | `/api/patients/:id/notes`                        | List/add notes                    |
+| PATCH/DELETE | `/api/patients/:id/notes/:noteId`             | Pin/unpin or delete a note         |
+
+File bytes never pass through the Next.js server: the browser uploads
+directly to Supabase Storage using a signed upload URL/token
+(`supabase.storage.from(bucket).uploadToSignedUrl(...)`), and the server
+only ever handles metadata.
+
+## 7. Validation
+
+`src/lib/validations/patients.ts` - patient demographics (DOB can't be in
+the future, SSN last-4 must be exactly 4 digits), insurance policy
+(termination date must be on/after the effective date), document metadata
+(25MB cap enforced both client- and server-side), history entry, note, and
+search/pagination params.
+
+## 8. Frontend Pages
+
+- `src/app/(dashboard)/patients/page.tsx` (list)
+- `src/app/(dashboard)/patients/new/page.tsx` (register)
+- `src/app/(dashboard)/patients/[id]/page.tsx` (profile)
+- `src/app/(dashboard)/patients/[id]/edit/page.tsx` (edit)
+
+## 9. Components
+
+`src/components/patients/*` - `PatientForm`, `PatientsTable`,
+`PatientsFilters`, `PatientHeader`, `PatientTabs`, `OverviewTab`,
+`InsuranceTab`, `DocumentsTab`, `HistoryTab`, `NotesTab`,
+`UpcomingModulePlaceholder`. New shared components: `ServerPagination`
+(`src/components/shared/`) for server-fetched pages, and a generic
+`onRowClick` prop added to the Module 1 `DataTable`.
+
+## 10. Business Logic
+
+- **MRN generation**: sequential per organization (`MB-000001`, `MB-000002`,
+  ...), with retry-on-conflict (Postgres `23505`) to handle the rare race
+  between two simultaneous registrations.
+- **Insurance rank supersession**: a patient can have at most one *active*
+  policy per rank (enforced by a partial unique index); adding a new active
+  policy for an already-covered rank deactivates the old one rather than
+  rejecting the request, preserving coverage history.
+- **Document storage isolation**: every object path is prefixed with the
+  organization id, and Storage RLS policies enforce that prefix server-side
+  - a signed URL minted for one org's patient document cannot be
+    replayed against another org's data even if leaked.
+- **Audit trail**: every patient create/update, insurance add/deactivate,
+  document upload/delete, history add/delete, and note add/delete writes to
+  `audit_logs`, consistent with Module 1.
+
+## 11. Testing
+
+- `tests/validations/patients.test.ts` - patient/insurance/document/history/
+  note schema edge cases (future DOB, bad SSN format, termination-before-
+  effective date, oversized file, empty note body).
+- `tests/services/patient-document-service.test.ts` - storage path
+  construction: org/patient scoping, filename sanitization, uniqueness.
+
+## 12. Folder Structure
+
+```
+supabase/migrations/
+  00000000000006_patients_schema.sql
+  00000000000007_patients_rls_storage.sql
+src/
+  app/(dashboard)/patients/
+    page.tsx                  list
+    new/page.tsx               register
+    [id]/page.tsx               profile
+    [id]/edit/page.tsx           edit
+  app/api/patients/            10 route handlers (see API table)
+  components/patients/          PatientForm, tables, tabs
+  components/shared/
+    server-pagination.tsx      new
+    data-table.tsx              + onRowClick prop
+  hooks/use-debounced-callback.ts  new
+  lib/services/patient-*.ts      5 services
+  lib/validations/patients.ts
+tests/
+  validations/patients.test.ts
+  services/patient-document-service.test.ts
+```
+
+## 13. Future Improvements
+
+- **Duplicate-patient detection**: fuzzy match on name + DOB + phone at
+  registration time to warn front-desk staff before creating a duplicate MRN.
+- **Real payer directory**: `patient_insurance_policies.payer_name`/
+  `payer_id_code` are free text today; once the Insurance module ships,
+  migrate these to a foreign key into a proper `insurance_companies` table
+  with real payer IDs and eligibility integration.
+- **OCR on upload**: auto-extract policy number/group number from an
+  uploaded insurance card image (ties into the AI module's "OCR Insurance
+  Cards" feature).
+- **Structured clinical coding**: `patient_medical_history` is a simple
+  free-text timeline; a clinical-grade build-out would code conditions to
+  ICD-10 and medications to RxNorm/NDC once the Medical Coding module ships.
+- **Guarantor billing**: `guarantor_patient_id` exists on the schema but
+  there's no UI yet to assign/manage a responsible party distinct from the
+  patient - natural to add once statements/billing exist.
+- Claims, Balances, and Payment History tabs go from placeholders to real
+  data automatically once the Claims and Payment Posting modules ship,
+  since they already read from the same `patients.id` foreign key those
+  modules will use.
 
 ---
 

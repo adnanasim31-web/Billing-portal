@@ -28,7 +28,7 @@ export interface NavItem {
 export const PRIMARY_NAV: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, enabled: true },
   { label: "Claims", href: "/claims", icon: ReceiptText, enabled: false },
-  { label: "Patients", href: "/patients", icon: Users, enabled: false },
+  { label: "Patients", href: "/patients", icon: Users, enabled: true },
   { label: "Eligibility", href: "/eligibility", icon: BadgeCheck, enabled: false },
   { label: "Insurance", href: "/insurance", icon: ShieldAlert, enabled: false },
   { label: "Payments", href: "/payments", icon: Wallet, enabled: false },
