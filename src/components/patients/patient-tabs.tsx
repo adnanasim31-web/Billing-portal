@@ -7,6 +7,7 @@ import { InsuranceTab, type InsurancePolicyRow } from "@/components/patients/ins
 import { DocumentsTab, type PatientDocumentRow } from "@/components/patients/documents-tab";
 import { HistoryTab, type HistoryEntryRow } from "@/components/patients/history-tab";
 import { NotesTab, type PatientNoteRow } from "@/components/patients/notes-tab";
+import { PatientAppointmentsTab, type PatientAppointmentRow } from "@/components/patients/patient-appointments-tab";
 import { UpcomingModulePlaceholder } from "@/components/shared/upcoming-module-placeholder";
 
 interface PatientTabsProps {
@@ -28,13 +29,23 @@ interface PatientTabsProps {
   documents: PatientDocumentRow[];
   history: HistoryEntryRow[];
   notes: PatientNoteRow[];
+  appointments: PatientAppointmentRow[];
 }
 
-export function PatientTabs({ patientId, overview, insurance, documents, history, notes }: PatientTabsProps) {
+export function PatientTabs({
+  patientId,
+  overview,
+  insurance,
+  documents,
+  history,
+  notes,
+  appointments,
+}: PatientTabsProps) {
   return (
     <Tabs defaultValue="overview">
       <TabsList className="flex-wrap">
         <TabsTrigger value="overview">Overview</TabsTrigger>
+        <TabsTrigger value="appointments">Appointments ({appointments.length})</TabsTrigger>
         <TabsTrigger value="insurance">Insurance ({insurance.length})</TabsTrigger>
         <TabsTrigger value="documents">Documents ({documents.length})</TabsTrigger>
         <TabsTrigger value="history">Medical History ({history.length})</TabsTrigger>
@@ -45,6 +56,9 @@ export function PatientTabs({ patientId, overview, insurance, documents, history
 
       <TabsContent value="overview">
         <OverviewTab {...overview} />
+      </TabsContent>
+      <TabsContent value="appointments">
+        <PatientAppointmentsTab patientId={patientId} appointments={appointments} />
       </TabsContent>
       <TabsContent value="insurance">
         <InsuranceTab patientId={patientId} policies={insurance} />

@@ -29,6 +29,16 @@ export type MedicalHistoryStatus = "active" | "resolved" | "chronic";
 export type PatientNoteType = "general" | "billing" | "clinical" | "collections";
 export type ProviderType = "individual" | "organization";
 export type ProviderStatus = "active" | "inactive" | "pending";
+export type AppointmentType = "new_patient" | "follow_up" | "procedure" | "telehealth" | "other";
+export type AppointmentStatus =
+  | "scheduled"
+  | "checked_in"
+  | "in_progress"
+  | "completed"
+  | "cancelled"
+  | "no_show";
+export type CodeSet = "CPT" | "HCPCS";
+export type CodingFavoriteType = "icd10" | "cpt" | "hcpcs" | "modifier";
 
 export interface Database {
   public: {
@@ -678,6 +688,124 @@ export interface Database {
           name: string;
         };
         Update: Partial<Database["public"]["Tables"]["insurance_companies"]["Row"]>;
+      };
+      appointments: {
+        Row: {
+          id: string;
+          organization_id: string;
+          patient_id: string;
+          provider_id: string;
+          appointment_type: AppointmentType;
+          scheduled_start: string;
+          scheduled_end: string;
+          status: AppointmentStatus;
+          reason: string | null;
+          location: string | null;
+          checked_in_at: string | null;
+          checked_out_at: string | null;
+          cancelled_at: string | null;
+          cancellation_reason: string | null;
+          created_by: string | null;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "appointments_patient_id_fkey";
+            columns: ["patient_id"];
+            isOneToOne: false;
+            referencedRelation: "patients";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "appointments_provider_id_fkey";
+            columns: ["provider_id"];
+            isOneToOne: false;
+            referencedRelation: "providers";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["appointments"]["Row"]> & {
+          organization_id: string;
+          patient_id: string;
+          provider_id: string;
+          scheduled_start: string;
+          scheduled_end: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["appointments"]["Row"]>;
+      };
+      icd10_codes: {
+        Row: {
+          code: string;
+          description: string;
+          category: string;
+          is_billable: boolean;
+          created_at: string;
+        };
+        Relationships: [];
+        Insert: Partial<Database["public"]["Tables"]["icd10_codes"]["Row"]> & {
+          code: string;
+          description: string;
+          category: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["icd10_codes"]["Row"]>;
+      };
+      procedure_codes: {
+        Row: {
+          code: string;
+          code_set: CodeSet;
+          description: string;
+          category: string;
+          created_at: string;
+        };
+        Relationships: [];
+        Insert: Partial<Database["public"]["Tables"]["procedure_codes"]["Row"]> & {
+          code: string;
+          code_set: CodeSet;
+          description: string;
+          category: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["procedure_codes"]["Row"]>;
+      };
+      modifiers: {
+        Row: {
+          code: string;
+          description: string;
+          created_at: string;
+        };
+        Relationships: [];
+        Insert: Partial<Database["public"]["Tables"]["modifiers"]["Row"]> & {
+          code: string;
+          description: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["modifiers"]["Row"]>;
+      };
+      coding_favorites: {
+        Row: {
+          id: string;
+          user_id: string;
+          organization_id: string;
+          code_type: CodingFavoriteType;
+          code: string;
+          created_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "coding_favorites_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["coding_favorites"]["Row"]> & {
+          user_id: string;
+          organization_id: string;
+          code_type: CodingFavoriteType;
+          code: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["coding_favorites"]["Row"]>;
       };
     };
     Views: Record<string, never>;

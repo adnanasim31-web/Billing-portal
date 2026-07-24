@@ -7,6 +7,8 @@ Built module by module. Shipped so far:
 - **Module 2: Patients**
 - **Module 3: Providers**
 - **Module 4: Insurance** (payer directory)
+- **Module 5: Appointments**
+- **Module 6: Medical Coding** (ICD-10/CPT/HCPCS/Modifiers)
 
 ## Architecture decision
 
@@ -712,6 +714,221 @@ tests/
 - **Bulk import**: NPPES NPI registry lookup/autofill when adding a
   provider, and a CSV import for payer directories, would both reduce
   manual data entry at organization onboarding.
+
+---
+
+# Module 5: Appointments & Module 6: Medical Coding
+
+Built together: Appointments needed Providers (Module 3) to book against,
+and both are prerequisites for Claims. Medical Coding is largely
+independent but shipped alongside since it's a similarly-scoped reference
+library module.
+
+**A note on scope for both**: this module also went back and added
+page-level permission checks (`hasPermission()` + redirect) to the
+patient profile page, since building the new Appointments tab surfaced a
+gap - Modules 1-4's dashboard pages fetch data directly via the admin
+Supabase client (which bypasses RLS) without checking the caller's RBAC
+permission first, relying only on the API routes for enforcement. The new
+Appointments/Coding pages ship with the check from day one; the
+pre-existing gap in Patients/Providers/Insurance/Settings pages is called
+out explicitly in Future Improvements below rather than silently patched
+everywhere, since that's a larger, deliberate cross-module pass.
+
+## 1. UI Design
+
+- **Appointments** (`/appointments`): a day-schedule list (date/provider/
+  status filters) rather than a full drag-drop calendar grid - keeps the
+  bundle free of a heavy calendar library while still covering scheduling,
+  check-in/check-out, and provider assignment. Appointment detail page
+  surfaces the valid next status transitions as buttons (e.g. "Check in"
+  only appears on a `scheduled` appointment).
+- **Medical Coding** (`/coding`): tabbed browser - My Favorites, ICD-10,
+  CPT, HCPCS, Modifiers - each with live search and a star-to-favorite
+  toggle per code.
+- **Cross-module integration**: the patient profile gained a real
+  Appointments tab, and appointment scheduling can be launched directly
+  from a patient's profile (`/appointments/new?patientId=...`) with the
+  patient pre-filled.
+
+## 2. Database Tables
+
+`supabase/migrations/00000000000012` through `00000000000016`:
+
+- `appointments` - patient/provider/time range/status/type. A **GiST
+  exclusion constraint** (`btree_gist` extension) makes provider
+  double-booking impossible at the database level, not just app-side
+  validation - two active appointments for the same provider with
+  overlapping time ranges are rejected by Postgres itself. Cancelled/
+  no-show appointments are excluded from the overlap check since they no
+  longer occupy the calendar.
+- `icd10_codes`, `procedure_codes` (CPT/HCPCS), `modifiers` - shared
+  master-data reference libraries, **not** organization-scoped (every org
+  sees the same ICD-10/CPT/HCPCS/modifier codes), seeded with ~100
+  representative common-specialty codes (see Future Improvements for
+  loading the full NLM/CMS code sets).
+- `coding_favorites` - per-user quick-access favorites into those
+  libraries.
+
+All are RLS-protected using the already-seeded `appointments.*`/
+`coding.view` permissions from Module 1 - no permission-catalog migration
+needed. `icd10_codes`/`procedure_codes`/`modifiers` have select-only
+policies (writes are service-role/seed-managed); `coding_favorites` is
+strictly per-user (`user_id = auth.uid()`).
+
+### Relationships
+
+```
+patients 1---N appointments N---1 providers
+profiles 1---N coding_favorites  (favorites reference icd10_codes/procedure_codes/modifiers by code, not FK - see below)
+```
+
+`coding_favorites.code` is intentionally not a foreign key, since it can
+point into one of three different reference tables depending on
+`code_type` - Postgres doesn't support a conditional/polymorphic FK, so
+this is validated at the application layer (the code must exist in the
+matching library) rather than the database layer.
+
+## 3. Models
+
+`src/types/database.types.ts` extended with `appointments`, `icd10_codes`,
+`procedure_codes`, `modifiers`, `coding_favorites`.
+
+## 4. Controllers (Route Handlers)
+
+`src/app/api/appointments/**` and `src/app/api/coding/**` - 8 endpoints.
+
+## 5. Services
+
+- `appointment-service.ts` - day/patient-scoped listing, create/update
+  (translating the GiST exclusion constraint's Postgres `23P01` error
+  into a friendly "provider already booked" message), and status
+  transitions that stamp `checked_in_at`/`checked_out_at`/`cancelled_at`
+  as appropriate.
+- `coding-service.ts` - search across the three code libraries, favorite
+  add/remove.
+
+## 6. APIs
+
+| Method | URL                                | Purpose                                     |
+|--------|--------------------------------------|-----------------------------------------------|
+| GET    | `/api/appointments`                  | List appointments (date/provider/status filters) |
+| POST   | `/api/appointments`                  | Schedule an appointment (`appointments.manage`) |
+| GET    | `/api/appointments/:id`              | Get an appointment                             |
+| PATCH  | `/api/appointments/:id`              | Reschedule/edit (`appointments.manage`)        |
+| PATCH  | `/api/appointments/:id/status`       | Transition status (check-in/start/complete/cancel/no-show) |
+| GET    | `/api/coding/icd10`                  | Search ICD-10 codes                            |
+| GET    | `/api/coding/procedures`             | Search CPT/HCPCS (`?codeSet=CPT\|HCPCS`)       |
+| GET    | `/api/coding/modifiers`              | Search modifiers                               |
+| GET/POST/DELETE | `/api/coding/favorites`     | List/add/remove the caller's favorites         |
+
+## 7. Validation
+
+`src/lib/validations/appointments.ts` - end time after start time on the
+same day; a `superRefine`-style check requiring a cancellation reason only
+when the target status is `cancelled`.
+`src/lib/validations/coding.ts` - format-only regex validators per code
+type (`isValidCodeFormat`), reusable later by Claims to sanity-check codes
+entered outside the picker.
+
+## 8. Frontend Pages
+
+- `src/app/(dashboard)/appointments/{page,new/page,[id]/page,[id]/edit/page}.tsx`
+- `src/app/(dashboard)/coding/page.tsx`
+
+## 9. Components
+
+- `src/components/appointments/*` - `AppointmentForm`,
+  `AppointmentFilters`, `AppointmentsScheduleList`,
+  `AppointmentDetailActions`.
+- `src/components/coding/*` - `CodingTabs`, `CodingBrowser`,
+  `FavoritesTab`.
+- `src/components/shared/search-combobox.tsx` - new reusable type-ahead
+  select (fetches options from the server as the user types), used for the
+  patient/provider pickers on the appointment form. Generic enough for
+  future modules (e.g. Claims' patient/provider selection) to reuse as-is.
+
+## 10. Business Logic
+
+- **Double-booking prevention at the data layer**: rather than checking
+  for overlaps in application code (which has TOCTOU race conditions under
+  concurrent requests), the `appointments` table uses a GiST exclusion
+  constraint - Postgres itself guarantees no two active appointments for
+  the same provider can overlap, regardless of how many requests race to
+  create them.
+- **Status transition guardrails**: the UI only ever offers the valid next
+  actions for an appointment's current status (e.g. you cannot "complete"
+  a `scheduled` appointment without checking in first), though the API
+  itself accepts any of the six statuses - the guardrail is UX, not a
+  state-machine enforced server-side (see Future Improvements).
+- **Shared reference data**: ICD-10/CPT/HCPCS/modifiers are loaded once as
+  platform-wide master data rather than duplicated per organization,
+  consistent with how these code sets work in reality (every practice
+  uses the same national code sets).
+
+## 11. Testing
+
+- `tests/validations/appointments.test.ts` - time ordering, cancellation-
+  reason requirement, UUID/date format checks.
+- `tests/validations/coding.test.ts` - per-code-type format validators.
+
+## 12. Folder Structure
+
+```
+supabase/migrations/
+  00000000000012_appointments_schema.sql
+  00000000000013_appointments_rls.sql
+  00000000000014_coding_schema.sql
+  00000000000015_coding_rls.sql
+  00000000000016_coding_seed.sql
+src/
+  app/(dashboard)/appointments/        list, new, [id], [id]/edit
+  app/(dashboard)/coding/               page.tsx
+  app/api/appointments/                 3 route handlers
+  app/api/coding/                       4 route handlers
+  components/appointments/               form, filters, schedule list, detail actions
+  components/coding/                     tabs, browser, favorites
+  components/shared/search-combobox.tsx  new
+  lib/services/appointment-service.ts
+  lib/services/coding-service.ts
+  lib/validations/appointments.ts
+  lib/validations/coding.ts
+tests/
+  validations/appointments.test.ts
+  validations/coding.test.ts
+```
+
+## 13. Future Improvements
+
+- **Fix the pre-existing page-level authorization gap**: Modules 1-4's
+  dashboard pages (Patients, Providers, Insurance, Settings) don't check
+  `hasPermission()` before fetching data - only the API routes do, and the
+  services use the service-role client which bypasses RLS. Any
+  authenticated org member can currently reach those pages' data by URL
+  even without the relevant permission, since nothing hides the route
+  itself. This module's own pages (Appointments, Coding) were built with
+  the check from the start; a dedicated pass should retrofit the same
+  guard onto every existing dashboard page.
+- **Per-organization timezone**: `appointment-service.ts` currently treats
+  date+time input as UTC (documented in a code comment) - correct
+  scheduling requires storing each organization's IANA timezone
+  (`organizations.timezone` already exists in the schema from Module 1 but
+  isn't read here yet) and converting local time to UTC on write.
+- **Server-side status state machine**: status transitions are only
+  guarded in the UI; the API will currently accept any status value from
+  any prior status. A `is_valid_transition(from, to)` check belongs in
+  `updateAppointmentStatus()` before this is safe to expose to a public
+  API client.
+- **Full code sets**: load the complete ICD-10-CM (~70,000 codes) and
+  CPT/HCPCS sets from the NLM/CMS/AMA distributions instead of the ~100-
+  code representative sample, likely via a scheduled import job rather
+  than a SQL seed file.
+- **Recurring appointments and reminders**: no recurrence rule or
+  patient reminder (SMS/email) support yet - natural additions once the
+  Messaging module ships.
+- **Code validation in Claims**: `isValidCodeFormat()` exists but isn't
+  called from anywhere yet - wire it into the future Claims module's
+  diagnosis/procedure code entry for real-time format feedback.
 
 ---
 

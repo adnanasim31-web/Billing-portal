@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import { getCurrentUser } from "@/lib/services/current-user-service";
+import { getCurrentUser, hasPermission } from "@/lib/services/current-user-service";
 import { getPatientById } from "@/lib/services/patient-service";
 import { listPatientInsurance } from "@/lib/services/patient-insurance-service";
 import { listPatientDocuments, getSignedDownloadUrl } from "@/lib/services/patient-document-service";
 import { listPatientHistory } from "@/lib/services/patient-history-service";
 import { listPatientNotes } from "@/lib/services/patient-notes-service";
+import { listAppointmentsForPatient } from "@/lib/services/appointment-service";
+import { PERMISSIONS } from "@/lib/constants/permissions";
 import { PatientHeader } from "@/components/patients/patient-header";
 import { PatientTabs } from "@/components/patients/patient-tabs";
 
@@ -14,16 +16,18 @@ export const metadata: Metadata = { title: "Patient Profile" };
 export default async function PatientProfilePage({ params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
   if (!user?.organizationId) redirect("/login");
+  if (!hasPermission(user, PERMISSIONS.PATIENTS_VIEW)) redirect("/dashboard");
 
   const { id } = await params;
   const patient = await getPatientById(id, user.organizationId);
   if (!patient) notFound();
 
-  const [policies, documents, history, notes] = await Promise.all([
+  const [policies, documents, history, notes, appointments] = await Promise.all([
     listPatientInsurance(id, user.organizationId),
     listPatientDocuments(id, user.organizationId),
     listPatientHistory(id, user.organizationId),
     listPatientNotes(id, user.organizationId),
+    listAppointmentsForPatient(id, user.organizationId),
   ]);
 
   const documentsWithUrls = await Promise.all(
@@ -93,6 +97,16 @@ export default async function PatientProfilePage({ params }: { params: Promise<{
           isPinned: n.is_pinned,
           createdAt: n.created_at,
           authorName: n.profiles ? `${n.profiles.first_name} ${n.profiles.last_name}` : "Unknown",
+        }))}
+        appointments={appointments.map((a) => ({
+          id: a.id,
+          providerName: a.providers
+            ? a.providers.provider_type === "organization"
+              ? (a.providers.organization_name ?? "")
+              : `${a.providers.first_name ?? ""} ${a.providers.last_name ?? ""}`.trim()
+            : "Unknown provider",
+          scheduledStart: a.scheduled_start,
+          status: a.status,
         }))}
       />
     </div>
