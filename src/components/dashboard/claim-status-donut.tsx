@@ -3,10 +3,10 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 
 const DATA = [
-  { name: "Paid", value: 156, color: "#12875D" },
+  { name: "Paid", value: 156, color: "#0E9F6E" },
   { name: "Pending", value: 43, color: "#B7791F" },
   { name: "Denied", value: 28, color: "#D5433C" },
-  { name: "In Review", value: 14, color: "#0F6CBD" },
+  { name: "In Review", value: 14, color: "#14B8A6" },
 ];
 
 const TOTAL = DATA.reduce((sum, d) => sum + d.value, 0);

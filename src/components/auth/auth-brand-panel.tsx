@@ -1,4 +1,5 @@
 import { Activity, ShieldCheck, TrendingUp } from "lucide-react";
+import { Kicker } from "@/components/shared/kicker";
 
 const HIGHLIGHTS = [
   {
@@ -25,7 +26,7 @@ export function AuthBrandPanel() {
         className="pointer-events-none absolute inset-0 opacity-40"
         style={{
           backgroundImage:
-            "radial-gradient(circle at 15% 20%, rgba(15,108,189,0.35), transparent 45%), radial-gradient(circle at 85% 80%, rgba(15,108,189,0.25), transparent 40%)",
+            "radial-gradient(circle at 15% 20%, rgba(16,185,129,0.35), transparent 45%), radial-gradient(circle at 85% 80%, rgba(20,184,166,0.25), transparent 40%)",
         }}
       />
 
@@ -39,11 +40,12 @@ export function AuthBrandPanel() {
         </div>
       </div>
 
-      <div className="relative z-10 max-w-md space-y-10">
-        <h1 className="text-3xl font-semibold leading-tight tracking-tight">
-          Revenue cycle management, modernized.
+      <div className="relative z-10 max-w-md space-y-6">
+        <Kicker>MedBill RCM Suite</Kicker>
+        <h1 className="text-3xl font-bold leading-tight tracking-tight">
+          Revenue cycle management, <span className="text-primary-400">modernized.</span>
         </h1>
-        <div className="space-y-6">
+        <div className="space-y-6 pt-4">
           {HIGHLIGHTS.map((item) => (
             <div key={item.title} className="flex gap-3.5">
               <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sidebar-accent">
