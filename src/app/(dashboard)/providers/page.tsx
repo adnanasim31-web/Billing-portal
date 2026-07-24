@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { UserPlus } from "lucide-react";
-import { getCurrentUser } from "@/lib/services/current-user-service";
+import { getCurrentUser, hasPermission } from "@/lib/services/current-user-service";
 import { listProviders } from "@/lib/services/provider-service";
+import { PERMISSIONS } from "@/lib/constants/permissions";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { ProvidersFilters } from "@/components/providers/providers-filters";
@@ -22,6 +23,7 @@ interface ProvidersPageProps {
 export default async function ProvidersPage({ searchParams }: ProvidersPageProps) {
   const user = await getCurrentUser();
   if (!user?.organizationId) redirect("/login");
+  if (!hasPermission(user, PERMISSIONS.PROVIDERS_VIEW)) redirect("/dashboard");
 
   const params = await searchParams;
   const status = (params.status as ProviderStatus | "all" | undefined) ?? "all";

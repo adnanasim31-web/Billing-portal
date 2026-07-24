@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import { getCurrentUser } from "@/lib/services/current-user-service";
+import { getCurrentUser, hasPermission } from "@/lib/services/current-user-service";
 import { getProviderById } from "@/lib/services/provider-service";
+import { PERMISSIONS } from "@/lib/constants/permissions";
 import { PageHeader } from "@/components/shared/page-header";
 import { ProviderForm } from "@/components/providers/provider-form";
 
@@ -10,6 +11,7 @@ export const metadata: Metadata = { title: "Edit Provider" };
 export default async function EditProviderPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
   if (!user?.organizationId) redirect("/login");
+  if (!hasPermission(user, PERMISSIONS.PROVIDERS_MANAGE)) redirect("/dashboard");
 
   const { id } = await params;
   const provider = await getProviderById(id, user.organizationId);

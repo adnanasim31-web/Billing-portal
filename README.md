@@ -900,15 +900,6 @@ tests/
 
 ## 13. Future Improvements
 
-- **Fix the pre-existing page-level authorization gap**: Modules 1-4's
-  dashboard pages (Patients, Providers, Insurance, Settings) don't check
-  `hasPermission()` before fetching data - only the API routes do, and the
-  services use the service-role client which bypasses RLS. Any
-  authenticated org member can currently reach those pages' data by URL
-  even without the relevant permission, since nothing hides the route
-  itself. This module's own pages (Appointments, Coding) were built with
-  the check from the start; a dedicated pass should retrofit the same
-  guard onto every existing dashboard page.
 - **Per-organization timezone**: `appointment-service.ts` currently treats
   date+time input as UTC (documented in a code comment) - correct
   scheduling requires storing each organization's IANA timezone
@@ -929,6 +920,52 @@ tests/
 - **Code validation in Claims**: `isValidCodeFormat()` exists but isn't
   called from anywhere yet - wire it into the future Claims module's
   diagnosis/procedure code entry for real-time format feedback.
+
+---
+
+## Addendum: page-level authorization cleanup
+
+Every dashboard page across Modules 1-6 now checks `hasPermission()` before
+fetching or rendering data - not just the API routes. Previously, pages
+for Patients, Providers, Insurance, and Settings (Team Members, Roles)
+fetched data directly via server-side service calls (which use the
+service-role client and therefore bypass RLS) without first confirming the
+caller's role actually grants the relevant permission; only the
+corresponding `POST`/`PATCH`/`DELETE` API routes enforced it. In practice
+this was low-risk with the default seeded roles (all sensibly scoped), but
+it meant a custom restricted role (e.g. one deliberately missing
+`patients.view`) could still reach a page's data by navigating to it
+directly, since nothing hid the route itself.
+
+Each page now redirects to `/dashboard` (or, for the dashboard page
+itself, to `/settings/profile` - a safe, permission-check-free landing
+page - to avoid a redirect loop) if the signed-in user's role lacks the
+matching permission:
+
+| Page(s)                                    | Permission checked      |
+|----------------------------------------------|---------------------------|
+| `/dashboard`                                  | `dashboard.view`          |
+| `/patients`, `/patients/[id]`                  | `patients.view`            |
+| `/patients/new`, `/patients/[id]/edit`         | `patients.manage`          |
+| `/providers`, `/providers/[id]`                | `providers.view`            |
+| `/providers/new`, `/providers/[id]/edit`       | `providers.manage`          |
+| `/insurance`, `/insurance/[id]`                | `insurance.view`            |
+| `/insurance/new`, `/insurance/[id]/edit`       | `insurance.manage`          |
+| `/settings/users`                              | `users.view`                |
+| `/settings/roles`                              | `roles.manage`              |
+| `/appointments/*`, `/coding`                   | already checked from Module 5/6's initial build |
+
+`/settings/profile` and `/settings/security` are intentionally left
+unguarded - they're self-scoped (every authenticated user manages their
+own profile and security settings regardless of role), so there's no
+permission to check.
+
+No schema, migration, or API changes were needed - this was purely
+additive page-level guards using the existing `hasPermission()` helper and
+`PERMISSIONS` constants from Module 1. Verified with typecheck, lint, the
+full test suite, and a production build; behavior is unchanged for every
+seeded role (Owner, Admin, Biller, Provider, Front Desk, Auditor, Read
+Only) since each already has the permissions its own pages check.
 
 ---
 

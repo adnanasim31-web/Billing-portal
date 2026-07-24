@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Pencil, ShieldCheck } from "lucide-react";
-import { getCurrentUser } from "@/lib/services/current-user-service";
+import { getCurrentUser, hasPermission } from "@/lib/services/current-user-service";
 import { getInsuranceCompanyById, listPatientsForPayer } from "@/lib/services/insurance-service";
+import { PERMISSIONS } from "@/lib/constants/permissions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { InsuranceCompanyTabs } from "@/components/insurance/insurance-company-tabs";
@@ -13,6 +14,7 @@ export const metadata: Metadata = { title: "Payer Profile" };
 export default async function InsuranceCompanyProfilePage({ params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
   if (!user?.organizationId) redirect("/login");
+  if (!hasPermission(user, PERMISSIONS.INSURANCE_VIEW)) redirect("/dashboard");
 
   const { id } = await params;
   const company = await getInsuranceCompanyById(id, user.organizationId);

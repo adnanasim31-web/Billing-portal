@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { getCurrentUser } from "@/lib/services/current-user-service";
+import { getCurrentUser, hasPermission } from "@/lib/services/current-user-service";
 import { listOrganizationUsers } from "@/lib/services/user-service";
 import { listRoles } from "@/lib/services/role-service";
+import { PERMISSIONS } from "@/lib/constants/permissions";
 import { PageHeader } from "@/components/shared/page-header";
 import { InviteUserDialog } from "@/components/settings/invite-user-dialog";
 import { UsersTable, type OrgUserRow } from "@/components/settings/users-table";
@@ -12,6 +13,7 @@ export const metadata: Metadata = { title: "Team Members" };
 export default async function UsersPage() {
   const user = await getCurrentUser();
   if (!user?.organizationId) redirect("/login");
+  if (!hasPermission(user, PERMISSIONS.USERS_VIEW)) redirect("/dashboard");
 
   const [rawUsers, roles] = await Promise.all([
     listOrganizationUsers(user.organizationId),

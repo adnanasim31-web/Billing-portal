@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { getCurrentUser } from "@/lib/services/current-user-service";
+import { getCurrentUser, hasPermission } from "@/lib/services/current-user-service";
 import { listRoles, listPermissionCatalog } from "@/lib/services/role-service";
+import { PERMISSIONS } from "@/lib/constants/permissions";
 import { PageHeader } from "@/components/shared/page-header";
 import { RolesGrid } from "@/components/settings/roles-grid";
 import { CreateRoleDialog } from "@/components/settings/create-role-dialog";
@@ -11,6 +12,7 @@ export const metadata: Metadata = { title: "Roles & Permissions" };
 export default async function RolesPage() {
   const user = await getCurrentUser();
   if (!user?.organizationId) redirect("/login");
+  if (!hasPermission(user, PERMISSIONS.ROLES_MANAGE)) redirect("/dashboard");
 
   const [roles, permissions] = await Promise.all([
     listRoles(user.organizationId),

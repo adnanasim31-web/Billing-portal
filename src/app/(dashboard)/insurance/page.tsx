@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Plus } from "lucide-react";
-import { getCurrentUser } from "@/lib/services/current-user-service";
+import { getCurrentUser, hasPermission } from "@/lib/services/current-user-service";
 import { listInsuranceCompanies } from "@/lib/services/insurance-service";
+import { PERMISSIONS } from "@/lib/constants/permissions";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { InsuranceSearch } from "@/components/insurance/insurance-search";
@@ -21,6 +22,7 @@ interface InsurancePageProps {
 export default async function InsurancePage({ searchParams }: InsurancePageProps) {
   const user = await getCurrentUser();
   if (!user?.organizationId) redirect("/login");
+  if (!hasPermission(user, PERMISSIONS.INSURANCE_VIEW)) redirect("/dashboard");
 
   const params = await searchParams;
   const page = params.page ? Number(params.page) : 1;

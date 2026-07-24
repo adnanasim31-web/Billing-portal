@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { AlertTriangle } from "lucide-react";
-import { getCurrentUser } from "@/lib/services/current-user-service";
+import { getCurrentUser, hasPermission } from "@/lib/services/current-user-service";
+import { PERMISSIONS } from "@/lib/constants/permissions";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { RevenueChart } from "@/components/dashboard/revenue-chart";
 import { ClaimStatusDonut } from "@/components/dashboard/claim-status-donut";
@@ -10,6 +12,8 @@ export const metadata: Metadata = { title: "Dashboard" };
 
 export default async function DashboardPage() {
   const user = await getCurrentUser();
+  if (!user) redirect("/login");
+  if (!hasPermission(user, PERMISSIONS.DASHBOARD_VIEW)) redirect("/settings/profile");
 
   return (
     <div className="space-y-6">

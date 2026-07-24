@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import { getCurrentUser } from "@/lib/services/current-user-service";
+import { getCurrentUser, hasPermission } from "@/lib/services/current-user-service";
 import { getPatientById } from "@/lib/services/patient-service";
+import { PERMISSIONS } from "@/lib/constants/permissions";
 import { PageHeader } from "@/components/shared/page-header";
 import { PatientForm } from "@/components/patients/patient-form";
 
@@ -10,6 +11,7 @@ export const metadata: Metadata = { title: "Edit Patient" };
 export default async function EditPatientPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
   if (!user?.organizationId) redirect("/login");
+  if (!hasPermission(user, PERMISSIONS.PATIENTS_MANAGE)) redirect("/dashboard");
 
   const { id } = await params;
   const patient = await getPatientById(id, user.organizationId);
