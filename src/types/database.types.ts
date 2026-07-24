@@ -27,6 +27,8 @@ export type DocumentCategory =
 export type MedicalHistoryType = "condition" | "allergy" | "medication" | "surgery" | "immunization";
 export type MedicalHistoryStatus = "active" | "resolved" | "chronic";
 export type PatientNoteType = "general" | "billing" | "clinical" | "collections";
+export type ProviderType = "individual" | "organization";
+export type ProviderStatus = "active" | "inactive" | "pending";
 
 export interface Database {
   public: {
@@ -444,6 +446,7 @@ export interface Database {
           termination_date: string | null;
           copay_amount: number | null;
           is_active: boolean;
+          payer_company_id: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -453,6 +456,13 @@ export interface Database {
             columns: ["patient_id"];
             isOneToOne: false;
             referencedRelation: "patients";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "patient_insurance_policies_payer_company_id_fkey";
+            columns: ["payer_company_id"];
+            isOneToOne: false;
+            referencedRelation: "insurance_companies";
             referencedColumns: ["id"];
           },
         ];
@@ -562,6 +572,112 @@ export interface Database {
           body: string;
         };
         Update: Partial<Database["public"]["Tables"]["patient_notes"]["Row"]>;
+      };
+      providers: {
+        Row: {
+          id: string;
+          organization_id: string;
+          provider_type: ProviderType;
+          first_name: string | null;
+          last_name: string | null;
+          credential_suffix: string | null;
+          organization_name: string | null;
+          npi: string;
+          tax_id: string | null;
+          specialty: string;
+          taxonomy_code: string | null;
+          license_number: string | null;
+          license_state: string | null;
+          dea_number: string | null;
+          email: string | null;
+          phone: string | null;
+          status: ProviderStatus;
+          created_by: string | null;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "providers_organization_id_fkey";
+            columns: ["organization_id"];
+            isOneToOne: false;
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["providers"]["Row"]> & {
+          organization_id: string;
+          npi: string;
+          specialty: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["providers"]["Row"]>;
+      };
+      provider_schedules: {
+        Row: {
+          id: string;
+          provider_id: string;
+          organization_id: string;
+          day_of_week: number;
+          start_time: string;
+          end_time: string;
+          location: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "provider_schedules_provider_id_fkey";
+            columns: ["provider_id"];
+            isOneToOne: false;
+            referencedRelation: "providers";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["provider_schedules"]["Row"]> & {
+          provider_id: string;
+          organization_id: string;
+          day_of_week: number;
+          start_time: string;
+          end_time: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["provider_schedules"]["Row"]>;
+      };
+      insurance_companies: {
+        Row: {
+          id: string;
+          organization_id: string;
+          name: string;
+          payer_id_code: string | null;
+          phone: string | null;
+          fax: string | null;
+          website: string | null;
+          claims_address_line1: string | null;
+          claims_address_line2: string | null;
+          claims_city: string | null;
+          claims_state: string | null;
+          claims_postal_code: string | null;
+          benefits_notes: string | null;
+          is_active: boolean;
+          created_by: string | null;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "insurance_companies_organization_id_fkey";
+            columns: ["organization_id"];
+            isOneToOne: false;
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["insurance_companies"]["Row"]> & {
+          organization_id: string;
+          name: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["insurance_companies"]["Row"]>;
       };
     };
     Views: Record<string, never>;

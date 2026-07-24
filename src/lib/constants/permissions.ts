@@ -11,6 +11,10 @@ export const PERMISSIONS = {
   PATIENTS_MANAGE: "patients.manage",
   DOCUMENTS_VIEW: "documents.view",
   DOCUMENTS_MANAGE: "documents.manage",
+  PROVIDERS_VIEW: "providers.view",
+  PROVIDERS_MANAGE: "providers.manage",
+  INSURANCE_VIEW: "insurance.view",
+  INSURANCE_MANAGE: "insurance.manage",
 } as const;
 
 export type PermissionSlug = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

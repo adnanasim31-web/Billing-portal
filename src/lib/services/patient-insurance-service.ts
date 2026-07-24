@@ -44,6 +44,7 @@ export async function createPatientInsurance(params: {
       patient_id: params.patientId,
       organization_id: params.organizationId,
       rank: params.input.rank,
+      payer_company_id: params.input.payerCompanyId || null,
       payer_name: params.input.payerName,
       payer_id_code: params.input.payerIdCode || null,
       plan_name: params.input.planName || null,

@@ -5,6 +5,8 @@ Built module by module. Shipped so far:
 
 - **Module 1: Authentication & User Management**
 - **Module 2: Patients**
+- **Module 3: Providers**
+- **Module 4: Insurance** (payer directory)
 
 ## Architecture decision
 
@@ -507,6 +509,209 @@ tests/
   data automatically once the Claims and Payment Posting modules ship,
   since they already read from the same `patients.id` foreign key those
   modules will use.
+
+---
+
+# Module 3: Providers & Module 4: Insurance
+
+Built together since Claims needs both: a rendering provider and a payer.
+Scope notes carried over from the original spec's module boundaries:
+- Deep CAQH/PECOS credentialing workflows and expiration-tracking alerts
+  are the future **Credentialing** module - Providers here holds only the
+  identifying/licensing fields Claims needs (NPI, Tax ID, license, DEA).
+- 270/271 electronic eligibility checks are the future **Eligibility**
+  module - Insurance here is just the payer/company directory (name, payer
+  ID, claims address, benefits notes). Patient-side insurance policies
+  shipped in Module 2 and are unchanged.
+
+## 1. UI Design
+
+- **Providers list** (`/providers`): searchable/filterable roster, same
+  `DataTable` pattern as Patients, with an avatar-style icon distinguishing
+  individual clinicians from organizations/groups.
+- **Provider profile** (`/providers/[id]`): header + tabs - Overview
+  (licensing/contact), Schedule (weekly availability), and placeholders for
+  Claims/Performance/Credentialing.
+- **Insurance list** (`/insurance`): payer directory with search.
+- **Payer profile** (`/insurance/[id]`): Overview (contact/claims address/
+  benefits notes) and a **Patients** tab - a real, non-placeholder list of
+  every patient currently carrying that payer, pulled from Module 2's
+  `patient_insurance_policies`.
+- **Cross-module integration**: the patient Insurance tab (Module 2) now
+  offers a "payer from directory" picker that auto-fills payer name/ID from
+  this module's directory, falling back to free text if a payer isn't in
+  the directory yet.
+
+## 2. Database Tables
+
+`supabase/migrations/00000000000008_providers_schema.sql` through
+`00000000000011_grant_front_desk_insurance_view.sql`:
+
+- `providers` - individual or organization/group providers. NPI unique per
+  org; a check constraint enforces first/last name for individuals and an
+  organization name for groups (whichever `provider_type` requires).
+- `provider_schedules` - recurring weekly availability blocks
+  (`day_of_week` 0-6, start/end time, location) - foundational for the
+  future Appointments module.
+- `insurance_companies` - payer directory (name unique per org, payer ID,
+  claims address, benefits notes).
+- `patient_insurance_policies` (Module 2) gained a nullable
+  `payer_company_id` FK to `insurance_companies` - additive only, existing
+  free-text `payer_name`/`payer_id_code` columns are untouched so policies
+  entered before a payer exists in the directory keep working.
+
+All three new tables are organization-scoped and RLS-protected using the
+already-seeded `providers.*`/`insurance.*` permissions from Module 1 - no
+new RBAC migration was needed for the permission catalog itself. One small
+RBAC *grant* migration (0011) was needed: Front Desk staff register
+patients and pick payers while doing so, but the Module 1 seed hadn't
+given that role `insurance.view` - migration 0011 grants it to both the
+global role template (future orgs) and any already-cloned Front Desk roles
+in existing organizations (past orgs), since role cloning only happens
+once at organization creation.
+
+### Relationships
+
+```
+organizations 1---N providers
+providers 1---N provider_schedules
+organizations 1---N insurance_companies
+insurance_companies 1---N patient_insurance_policies (payer_company_id, nullable)
+```
+
+## 3. Models
+
+`src/types/database.types.ts` extended with `providers`,
+`provider_schedules`, `insurance_companies`, and a patched
+`patient_insurance_policies` (new `payer_company_id` field +
+`Relationships` entry pointing at `insurance_companies`).
+
+## 4. Controllers (Route Handlers)
+
+`src/app/api/providers/**` and `src/app/api/insurance-companies/**` -
+9 endpoints total, same permission-checked/Zod-validated/thin pattern as
+every prior module.
+
+## 5. Services
+
+- `provider-service.ts` - search/pagination, create/update with a
+  friendly error when an NPI collides with an existing provider in the org.
+- `provider-schedule-service.ts` - list/add/remove weekly availability
+  blocks.
+- `insurance-service.ts` - search/pagination, create/update, a lightweight
+  `listActiveInsuranceCompaniesForSelect` for populating the payer picker,
+  and `listPatientsForPayer` (an embedded-select join from
+  `patient_insurance_policies` to `patients`) powering the payer profile's
+  Patients tab.
+
+## 6. APIs
+
+| Method | URL                                          | Purpose                              |
+|--------|------------------------------------------------|----------------------------------------|
+| GET    | `/api/providers`                                | Search/paginate providers               |
+| POST   | `/api/providers`                                | Add a provider (`providers.manage`)     |
+| GET    | `/api/providers/:id`                            | Get a provider                          |
+| PATCH  | `/api/providers/:id`                            | Update a provider (`providers.manage`)  |
+| GET/POST | `/api/providers/:id/schedule`                 | List/add weekly availability            |
+| DELETE | `/api/providers/:id/schedule/:scheduleId`       | Remove an availability block            |
+| GET    | `/api/insurance-companies`                      | Search/paginate payers, or `?select=1` for a lightweight active-only list |
+| POST   | `/api/insurance-companies`                      | Add a payer (`insurance.manage`)        |
+| GET    | `/api/insurance-companies/:id`                  | Get a payer                             |
+| PATCH  | `/api/insurance-companies/:id`                  | Update a payer (`insurance.manage`)     |
+
+## 7. Validation
+
+`src/lib/validations/providers.ts` - NPI (exactly 10 digits), Tax ID/EIN
+format, DEA number format (2 letters + 7 digits), a `superRefine` enforcing
+first/last name XOR organization name based on `providerType`, and a
+schedule schema requiring end time after start time.
+`src/lib/validations/insurance.ts` - payer name required, loose
+website/phone format checks.
+
+## 8. Frontend Pages
+
+- `src/app/(dashboard)/providers/{page,new/page,[id]/page,[id]/edit/page}.tsx`
+- `src/app/(dashboard)/insurance/{page,new/page,[id]/page,[id]/edit/page}.tsx`
+
+## 9. Components
+
+- `src/components/providers/*` - `ProviderForm` (conditional individual/
+  organization fields), `ProvidersTable`, `ProvidersFilters`,
+  `ProviderHeader`, `ProviderTabs`, `ProviderOverviewTab`, `ScheduleTab`.
+- `src/components/insurance/*` - `InsuranceCompanyForm`,
+  `InsuranceCompaniesTable`, `InsuranceSearch`, `InsuranceCompanyTabs`,
+  `PayerPatientsTab`.
+- `UpcomingModulePlaceholder` was promoted from `components/patients/` to
+  `components/shared/` since Providers now uses it too (Claims/Performance/
+  Credentialing tabs).
+
+## 10. Business Logic
+
+- **Provider identity branching**: a single `providers` table serves both
+  individual clinicians and organizations/groups via `provider_type`, with
+  a database check constraint (not just app-layer validation) requiring
+  the right name field is populated for each type.
+- **NPI uniqueness**: enforced per-organization at the database level
+  (`unique (organization_id, npi)`); the service layer translates the
+  resulting Postgres `23505` error into a friendly message instead of a
+  raw constraint violation.
+- **Payer directory as a soft dependency**: `patient_insurance_policies`
+  can reference a directory payer (`payer_company_id`) or stand alone with
+  free-text `payer_name` - the directory enriches data entry without
+  becoming a hard requirement, so Module 2 continues to work standalone.
+- **Cross-module read**: the payer profile's Patients tab is a live query,
+  not a placeholder - proof that the org-scoped, service-layer architecture
+  from Module 1 composes cleanly across modules built independently.
+
+## 11. Testing
+
+- `tests/validations/providers.test.ts` - individual-vs-organization
+  branching, NPI/DEA format edge cases, schedule time ordering.
+- `tests/validations/insurance.test.ts` - payer name/website validation.
+
+## 12. Folder Structure
+
+```
+supabase/migrations/
+  00000000000008_providers_schema.sql
+  00000000000009_insurance_schema.sql
+  00000000000010_providers_insurance_rls.sql
+  00000000000011_grant_front_desk_insurance_view.sql
+src/
+  app/(dashboard)/providers/          list, new, [id], [id]/edit
+  app/(dashboard)/insurance/           list, new, [id], [id]/edit
+  app/api/providers/                   4 route handlers
+  app/api/insurance-companies/         2 route handlers
+  components/providers/                 form, table, filters, tabs, schedule
+  components/insurance/                  form, table, search, tabs
+  lib/services/provider-service.ts
+  lib/services/provider-schedule-service.ts
+  lib/services/insurance-service.ts
+  lib/validations/providers.ts
+  lib/validations/insurance.ts
+tests/
+  validations/providers.test.ts
+  validations/insurance.test.ts
+```
+
+## 13. Future Improvements
+
+- **NPI Luhn validation**: current validation only checks digit count/
+  format; the NPI standard has a real check-digit algorithm that could be
+  added for stronger data quality.
+- **Provider-payer credentialing status**: once the Credentialing module
+  ships, link providers to insurance_companies with an enrollment/
+  in-network status per payer (a provider can be in-network with some
+  payers and not others).
+- **Schedule conflict detection**: `provider_schedules` doesn't currently
+  prevent overlapping blocks for the same provider/day - worth adding once
+  the Appointments module needs to book against real availability.
+- **Payer plan types**: `insurance_companies` is company-level only; a
+  future `insurance_plans` child table could capture HMO/PPO/EPO variants
+  per payer once Eligibility needs to distinguish them.
+- **Bulk import**: NPPES NPI registry lookup/autofill when adding a
+  provider, and a CSV import for payer directories, would both reduce
+  manual data entry at organization onboarding.
 
 ---
 

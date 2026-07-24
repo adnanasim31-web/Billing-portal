@@ -7,7 +7,7 @@ import { InsuranceTab, type InsurancePolicyRow } from "@/components/patients/ins
 import { DocumentsTab, type PatientDocumentRow } from "@/components/patients/documents-tab";
 import { HistoryTab, type HistoryEntryRow } from "@/components/patients/history-tab";
 import { NotesTab, type PatientNoteRow } from "@/components/patients/notes-tab";
-import { UpcomingModulePlaceholder } from "@/components/patients/upcoming-module-placeholder";
+import { UpcomingModulePlaceholder } from "@/components/shared/upcoming-module-placeholder";
 
 interface PatientTabsProps {
   patientId: string;

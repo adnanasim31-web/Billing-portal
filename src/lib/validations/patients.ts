@@ -42,6 +42,7 @@ export type PatientInput = z.infer<typeof patientSchema>;
 export const patientInsuranceSchema = z
   .object({
     rank: z.enum(["primary", "secondary", "tertiary"]),
+    payerCompanyId: z.string().uuid().optional().or(z.literal("")),
     payerName: z.string().min(1, "Payer name is required").max(160),
     payerIdCode: z.string().max(40).optional().or(z.literal("")),
     planName: z.string().max(160).optional().or(z.literal("")),

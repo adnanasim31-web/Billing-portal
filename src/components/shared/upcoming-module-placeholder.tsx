@@ -14,7 +14,7 @@ export function UpcomingModulePlaceholder({
     <EmptyState
       icon={icon}
       title={title}
-      description={`This ships with the ${moduleName} module - once it's built, it will appear here automatically for every patient.`}
+      description={`This ships with the ${moduleName} module - once it's built, it will appear here automatically.`}
     />
   );
 }

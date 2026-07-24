@@ -39,16 +39,32 @@ export interface InsurancePolicyRow {
   isActive: boolean;
 }
 
+interface DirectoryPayer {
+  id: string;
+  name: string;
+  payer_id_code: string | null;
+}
+
 export function InsuranceTab({ patientId, policies }: { patientId: string; policies: InsurancePolicyRow[] }) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [deactivatingId, setDeactivatingId] = React.useState<string | null>(null);
+  const [directoryPayers, setDirectoryPayers] = React.useState<DirectoryPayer[]>([]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    fetch("/api/insurance-companies?select=1")
+      .then((res) => (res.ok ? res.json() : []))
+      .then(setDirectoryPayers)
+      .catch(() => setDirectoryPayers([]));
+  }, [open]);
 
   const form = useForm<PatientInsuranceInput>({
     resolver: zodResolver(patientInsuranceSchema),
     defaultValues: {
       rank: "primary",
+      payerCompanyId: "",
       payerName: "",
       payerIdCode: "",
       planName: "",
@@ -119,6 +135,31 @@ export function InsuranceTab({ patientId, policies }: { patientId: string; polic
             </DialogHeader>
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                {directoryPayers.length > 0 && (
+                  <FormItem>
+                    <FormLabel>Payer from directory (optional)</FormLabel>
+                    <Select
+                      onValueChange={(value) => {
+                        const payer = directoryPayers.find((p) => p.id === value);
+                        if (!payer) return;
+                        form.setValue("payerCompanyId", payer.id);
+                        form.setValue("payerName", payer.name);
+                        if (payer.payer_id_code) form.setValue("payerIdCode", payer.payer_id_code);
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select from your payer directory..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {directoryPayers.map((payer) => (
+                          <SelectItem key={payer.id} value={payer.id}>
+                            {payer.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormItem>
+                )}
                 <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
