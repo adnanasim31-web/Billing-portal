@@ -39,6 +39,16 @@ export type AppointmentStatus =
   | "no_show";
 export type CodeSet = "CPT" | "HCPCS";
 export type CodingFavoriteType = "icd10" | "cpt" | "hcpcs" | "modifier";
+export type ClaimStatus =
+  | "draft"
+  | "ready"
+  | "submitted"
+  | "accepted"
+  | "rejected"
+  | "denied"
+  | "paid"
+  | "appealed"
+  | "closed";
 
 export interface Database {
   public: {
@@ -806,6 +816,182 @@ export interface Database {
           code: string;
         };
         Update: Partial<Database["public"]["Tables"]["coding_favorites"]["Row"]>;
+      };
+      claims: {
+        Row: {
+          id: string;
+          organization_id: string;
+          claim_number: string;
+          patient_id: string;
+          provider_id: string;
+          payer_company_id: string | null;
+          patient_insurance_policy_id: string | null;
+          status: ClaimStatus;
+          service_date_from: string;
+          service_date_to: string;
+          place_of_service: string | null;
+          total_charge_amount: number;
+          total_paid_amount: number;
+          total_adjustment_amount: number;
+          submitted_at: string | null;
+          accepted_at: string | null;
+          rejected_at: string | null;
+          rejection_reason: string | null;
+          appealed_at: string | null;
+          appeal_notes: string | null;
+          notes: string | null;
+          created_by: string | null;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "claims_patient_id_fkey";
+            columns: ["patient_id"];
+            isOneToOne: false;
+            referencedRelation: "patients";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "claims_provider_id_fkey";
+            columns: ["provider_id"];
+            isOneToOne: false;
+            referencedRelation: "providers";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "claims_payer_company_id_fkey";
+            columns: ["payer_company_id"];
+            isOneToOne: false;
+            referencedRelation: "insurance_companies";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "claims_patient_insurance_policy_id_fkey";
+            columns: ["patient_insurance_policy_id"];
+            isOneToOne: false;
+            referencedRelation: "patient_insurance_policies";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["claims"]["Row"]> & {
+          organization_id: string;
+          claim_number: string;
+          patient_id: string;
+          provider_id: string;
+          service_date_from: string;
+          service_date_to: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["claims"]["Row"]>;
+      };
+      claim_diagnoses: {
+        Row: {
+          id: string;
+          claim_id: string;
+          organization_id: string;
+          sequence: number;
+          icd10_code: string;
+          created_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "claim_diagnoses_claim_id_fkey";
+            columns: ["claim_id"];
+            isOneToOne: false;
+            referencedRelation: "claims";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "claim_diagnoses_icd10_code_fkey";
+            columns: ["icd10_code"];
+            isOneToOne: false;
+            referencedRelation: "icd10_codes";
+            referencedColumns: ["code"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["claim_diagnoses"]["Row"]> & {
+          claim_id: string;
+          organization_id: string;
+          sequence: number;
+          icd10_code: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["claim_diagnoses"]["Row"]>;
+      };
+      claim_lines: {
+        Row: {
+          id: string;
+          claim_id: string;
+          organization_id: string;
+          line_number: number;
+          procedure_code: string;
+          modifier_1: string | null;
+          modifier_2: string | null;
+          diagnosis_pointers: number[];
+          units: number;
+          charge_amount: number;
+          paid_amount: number;
+          adjustment_amount: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "claim_lines_claim_id_fkey";
+            columns: ["claim_id"];
+            isOneToOne: false;
+            referencedRelation: "claims";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "claim_lines_procedure_code_fkey";
+            columns: ["procedure_code"];
+            isOneToOne: false;
+            referencedRelation: "procedure_codes";
+            referencedColumns: ["code"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["claim_lines"]["Row"]> & {
+          claim_id: string;
+          organization_id: string;
+          line_number: number;
+          procedure_code: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["claim_lines"]["Row"]>;
+      };
+      claim_status_history: {
+        Row: {
+          id: string;
+          claim_id: string;
+          organization_id: string;
+          from_status: string | null;
+          to_status: string;
+          note: string | null;
+          changed_by: string | null;
+          created_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "claim_status_history_claim_id_fkey";
+            columns: ["claim_id"];
+            isOneToOne: false;
+            referencedRelation: "claims";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "claim_status_history_changed_by_fkey";
+            columns: ["changed_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["claim_status_history"]["Row"]> & {
+          claim_id: string;
+          organization_id: string;
+          to_status: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["claim_status_history"]["Row"]>;
       };
     };
     Views: Record<string, never>;

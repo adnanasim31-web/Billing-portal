@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { getCurrentUser, hasPermission } from "@/lib/services/current-user-service";
 import { getProviderById } from "@/lib/services/provider-service";
 import { listProviderSchedule } from "@/lib/services/provider-schedule-service";
+import { listClaimsForProvider } from "@/lib/services/claim-service";
 import { PERMISSIONS } from "@/lib/constants/permissions";
 import { ProviderHeader } from "@/components/providers/provider-header";
 import { ProviderTabs } from "@/components/providers/provider-tabs";
@@ -18,7 +19,10 @@ export default async function ProviderProfilePage({ params }: { params: Promise<
   const provider = await getProviderById(id, user.organizationId);
   if (!provider) notFound();
 
-  const schedule = await listProviderSchedule(id, user.organizationId);
+  const [schedule, claims] = await Promise.all([
+    listProviderSchedule(id, user.organizationId),
+    listClaimsForProvider(id, user.organizationId),
+  ]);
 
   const displayName =
     provider.provider_type === "organization"
@@ -55,6 +59,13 @@ export default async function ProviderProfilePage({ params }: { params: Promise<
           startTime: s.start_time,
           endTime: s.end_time,
           location: s.location,
+        }))}
+        claims={claims.map((c) => ({
+          id: c.id,
+          claimNumber: c.claim_number,
+          patientName: c.patients ? `${c.patients.first_name} ${c.patients.last_name}` : "Unknown patient",
+          totalChargeAmount: Number(c.total_charge_amount),
+          status: c.status,
         }))}
       />
     </div>

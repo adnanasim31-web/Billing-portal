@@ -1,6 +1,6 @@
 "use client";
 
-import { ReceiptText, Wallet } from "lucide-react";
+import { Wallet } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { OverviewTab } from "@/components/patients/overview-tab";
 import { InsuranceTab, type InsurancePolicyRow } from "@/components/patients/insurance-tab";
@@ -8,6 +8,7 @@ import { DocumentsTab, type PatientDocumentRow } from "@/components/patients/doc
 import { HistoryTab, type HistoryEntryRow } from "@/components/patients/history-tab";
 import { NotesTab, type PatientNoteRow } from "@/components/patients/notes-tab";
 import { PatientAppointmentsTab, type PatientAppointmentRow } from "@/components/patients/patient-appointments-tab";
+import { PatientClaimsTab, type PatientClaimRow } from "@/components/patients/patient-claims-tab";
 import { UpcomingModulePlaceholder } from "@/components/shared/upcoming-module-placeholder";
 
 interface PatientTabsProps {
@@ -30,6 +31,7 @@ interface PatientTabsProps {
   history: HistoryEntryRow[];
   notes: PatientNoteRow[];
   appointments: PatientAppointmentRow[];
+  claims: PatientClaimRow[];
 }
 
 export function PatientTabs({
@@ -40,6 +42,7 @@ export function PatientTabs({
   history,
   notes,
   appointments,
+  claims,
 }: PatientTabsProps) {
   return (
     <Tabs defaultValue="overview">
@@ -50,7 +53,7 @@ export function PatientTabs({
         <TabsTrigger value="documents">Documents ({documents.length})</TabsTrigger>
         <TabsTrigger value="history">Medical History ({history.length})</TabsTrigger>
         <TabsTrigger value="notes">Notes ({notes.length})</TabsTrigger>
-        <TabsTrigger value="claims">Claims</TabsTrigger>
+        <TabsTrigger value="claims">Claims ({claims.length})</TabsTrigger>
         <TabsTrigger value="balances">Balances</TabsTrigger>
       </TabsList>
 
@@ -73,7 +76,7 @@ export function PatientTabs({
         <NotesTab patientId={patientId} notes={notes} />
       </TabsContent>
       <TabsContent value="claims">
-        <UpcomingModulePlaceholder icon={ReceiptText} title="No claims yet" moduleName="Claims" />
+        <PatientClaimsTab patientId={patientId} claims={claims} />
       </TabsContent>
       <TabsContent value="balances">
         <UpcomingModulePlaceholder icon={Wallet} title="No balance information yet" moduleName="Payment Posting" />

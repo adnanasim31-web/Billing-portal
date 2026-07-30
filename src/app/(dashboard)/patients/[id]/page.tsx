@@ -7,6 +7,7 @@ import { listPatientDocuments, getSignedDownloadUrl } from "@/lib/services/patie
 import { listPatientHistory } from "@/lib/services/patient-history-service";
 import { listPatientNotes } from "@/lib/services/patient-notes-service";
 import { listAppointmentsForPatient } from "@/lib/services/appointment-service";
+import { listClaimsForPatient } from "@/lib/services/claim-service";
 import { PERMISSIONS } from "@/lib/constants/permissions";
 import { PatientHeader } from "@/components/patients/patient-header";
 import { PatientTabs } from "@/components/patients/patient-tabs";
@@ -22,12 +23,13 @@ export default async function PatientProfilePage({ params }: { params: Promise<{
   const patient = await getPatientById(id, user.organizationId);
   if (!patient) notFound();
 
-  const [policies, documents, history, notes, appointments] = await Promise.all([
+  const [policies, documents, history, notes, appointments, claims] = await Promise.all([
     listPatientInsurance(id, user.organizationId),
     listPatientDocuments(id, user.organizationId),
     listPatientHistory(id, user.organizationId),
     listPatientNotes(id, user.organizationId),
     listAppointmentsForPatient(id, user.organizationId),
+    listClaimsForPatient(id, user.organizationId),
   ]);
 
   const documentsWithUrls = await Promise.all(
@@ -107,6 +109,17 @@ export default async function PatientProfilePage({ params }: { params: Promise<{
             : "Unknown provider",
           scheduledStart: a.scheduled_start,
           status: a.status,
+        }))}
+        claims={claims.map((c) => ({
+          id: c.id,
+          claimNumber: c.claim_number,
+          providerName: c.providers
+            ? c.providers.provider_type === "organization"
+              ? (c.providers.organization_name ?? "")
+              : `${c.providers.first_name ?? ""} ${c.providers.last_name ?? ""}`.trim()
+            : "Unknown provider",
+          totalChargeAmount: Number(c.total_charge_amount),
+          status: c.status,
         }))}
       />
     </div>

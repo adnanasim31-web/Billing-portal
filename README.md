@@ -969,6 +969,225 @@ Only) since each already has the permissions its own pages check.
 
 ---
 
+# Module 7: Claims
+
+The natural next module once Patients, Providers, Insurance, and Medical
+Coding are all in place for it to draw on. Claims is the core of the
+"revenue cycle" in RCM: it turns a visit into a billable, trackable claim
+that moves through draft → submission → payer adjudication → payment/
+appeal.
+
+## 1. UI Design
+
+- **Claims list** (`/claims`): one list, filterable by status, doubles as
+  the "submission queue" (`ready`/`submitted`), "rejected claims"
+  (`rejected`), and "accepted claims" (`accepted`) views from the original
+  spec, rather than four separate pages - the same pattern used for
+  Appointments in Module 5.
+- **Claim creation**: a simple shell form (patient, rendering provider,
+  payer, service date range, place of service, notes) creates a `draft`
+  claim and redirects to its detail page - the same "create shell, then
+  attach" pattern as Patients/Providers, rather than a stateful multi-step
+  wizard with client-side array state.
+- **Claim detail** (`/claims/[id]`): diagnoses and procedure lines are
+  added incrementally via dialogs (search-and-pick from the Module 6 code
+  libraries), a scrubbing panel shows exactly what's blocking submission,
+  and status-transition buttons only show the valid next actions for the
+  claim's current status (mirroring Appointments' detail-actions pattern).
+  A status-history timeline records every transition with who/when/why.
+
+## 2. Database Tables
+
+`supabase/migrations/00000000000017` and `00000000000018`:
+
+- `claims` - the claim shell: patient/provider/payer/policy, service date
+  range, place of service, status, running `total_charge_amount`/
+  `total_paid_amount`/`total_adjustment_amount`, and denormalized
+  timestamp+reason columns for the four most operationally relevant
+  transitions (`submitted_at`, `accepted_at`, `rejected_at`+
+  `rejection_reason`, `appealed_at`+`appeal_notes`). Other transitions
+  (denied, paid, closed, back to draft) are recorded only in
+  `claim_status_history`, not given their own columns, to avoid schema
+  bloat - the history table is the full audit trail regardless.
+- `claim_diagnoses` - up to 12 ICD-10 pointers per claim (`sequence`
+  1-12), FK'd to `icd10_codes.code` so a claim can never reference a
+  diagnosis code that doesn't exist in the library.
+- `claim_lines` - CPT/HCPCS procedure lines with up to 2 modifiers,
+  `diagnosis_pointers` (a `smallint[]` referencing `claim_diagnoses
+  .sequence`), units, and charge/paid/adjustment amounts. FK'd to
+  `procedure_codes.code`/`modifiers.code`.
+- `claim_status_history` - append-only audit trail of every status
+  transition (`from_status`, `to_status`, `note`, `changed_by`,
+  `created_at`).
+
+All four tables are RLS-protected using the `claims.view`/`claims.manage`
+permissions already seeded in Module 1's permission catalog - no RBAC
+migration was needed. `claims.submit`/`claims.appeal` (also already
+seeded) gate the submit/appeal status transitions specifically at the
+application layer (API route + service), since those are state-transition
+actions rather than distinct row-level access patterns RLS can express.
+
+### Relationships
+
+```
+patients 1---N claims N---1 providers
+claims N---1 insurance_companies (payer, nullable)
+claims N---1 patient_insurance_policies (nullable)
+claims 1---N claim_diagnoses N---1 icd10_codes
+claims 1---N claim_lines N---1 procedure_codes
+claims 1---N claim_status_history N---1 profiles (changed_by)
+```
+
+## 3. Models
+
+`src/types/database.types.ts` extended with `claims`, `claim_diagnoses`,
+`claim_lines`, `claim_status_history`, and a new `ClaimStatus` union type
+(`draft | ready | submitted | accepted | rejected | denied | paid |
+appealed | closed`).
+
+## 4. Controllers (Route Handlers)
+
+`src/app/api/claims/**` - 8 endpoints (list/create, get/update shell,
+status transitions, scrub, diagnoses add/remove, lines add/remove).
+
+## 5. Services
+
+- `claim-service.ts` - claim number generation (`CLM-000001`, same
+  sequential-count-with-retry pattern as patient MRNs), CRUD for the
+  shell, diagnosis/line management with running-total recomputation on
+  every line add/remove, and status transitions that stamp the relevant
+  timestamp/reason columns and always write a `claim_status_history` row.
+  Shell/diagnosis/line edits are blocked with a friendly error once a
+  claim leaves `draft`/`ready` (`assertShellEditable`), so a submitted
+  claim's billed details can't be silently changed after the fact.
+- `claim-scrubbing.ts` - **pure, DB-free** claim-readiness logic
+  (`scrubClaim`), deliberately separated from `claim-service.ts` so it's
+  cheap to unit test without mocking Supabase. Checks: at least one
+  diagnosis and one procedure line exist, every ICD-10/CPT/HCPCS/modifier
+  code matches its format (reusing `isValidCodeFormat()` from Module 6 -
+  the integration point that module's README had already flagged), every
+  line's diagnosis pointers resolve to a diagnosis that actually exists on
+  the claim, charge amounts and units are positive, and the service date
+  range is valid. Missing payer is a warning, not a blocking error.
+
+## 6. APIs
+
+| Method | URL                                          | Purpose                                         |
+|--------|------------------------------------------------|--------------------------------------------------|
+| GET    | `/api/claims`                                   | List claims (query/status/provider filters)       |
+| POST   | `/api/claims`                                   | Create a claim shell (`claims.manage`)            |
+| GET    | `/api/claims/:id`                               | Get a claim + diagnoses + lines + status history  |
+| PATCH  | `/api/claims/:id`                               | Edit the shell (`claims.manage`, draft/ready only) |
+| PATCH  | `/api/claims/:id/status`                        | Transition status (`claims.manage`, plus `claims.submit`/`claims.appeal` for those specific transitions) |
+| GET    | `/api/claims/:id/scrub`                         | Run readiness scrubbing, return errors/warnings   |
+| POST   | `/api/claims/:id/diagnoses`                     | Add a diagnosis pointer (`claims.manage`)         |
+| DELETE | `/api/claims/:id/diagnoses/:diagnosisId`        | Remove a diagnosis pointer (`claims.manage`)      |
+| POST   | `/api/claims/:id/lines`                         | Add a procedure line (`claims.manage`)            |
+| DELETE | `/api/claims/:id/lines/:lineId`                 | Remove a procedure line (`claims.manage`)         |
+
+## 7. Validation
+
+`src/lib/validations/claims.ts` - `claimSchema` (service end date not
+before the start date), `claimDiagnosisSchema`/`claimLineSchema` (reusing
+`isValidCodeFormat()` for ICD-10/CPT/HCPCS/modifier format checks),
+`claimStatusChangeSchema` (requires a note when rejecting or denying).
+
+## 8. Frontend Pages
+
+- `src/app/(dashboard)/claims/{page,new/page,[id]/page,[id]/edit/page}.tsx`
+
+## 9. Components
+
+- `src/components/claims/*` - `ClaimsTable`, `ClaimsFilters`, `ClaimForm`,
+  `ClaimDiagnosesSection`, `ClaimLinesSection`, `ClaimScrubPanel`,
+  `ClaimStatusActions`, `ClaimStatusHistoryTimeline`.
+- `src/components/patients/patient-claims-tab.tsx` and
+  `src/components/providers/provider-claims-tab.tsx` - replace the
+  `UpcomingModulePlaceholder` "Claims" tabs added in earlier modules with
+  real, filtered claim lists and a "Create claim" shortcut that pre-fills
+  the patient or provider (`/claims/new?patientId=...` /
+  `?providerId=...`), mirroring the pattern already used for Appointments.
+
+## 10. Business Logic
+
+- **Shell lock after submission**: once a claim leaves `draft`/`ready`,
+  its patient/provider/payer/dates, diagnoses, and procedure lines can no
+  longer be edited or removed (`assertShellEditable` in
+  `claim-service.ts`) - correcting a submitted claim means reopening it
+  back to `draft` first (`rejected` → `draft` is a modeled transition),
+  which also keeps the status-history trail honest about what was billed
+  when.
+- **Running totals, not a database trigger**: `total_charge_amount` /
+  `total_paid_amount` / `total_adjustment_amount` are recomputed in
+  application code every time a line is added or removed, rather than via
+  a Postgres trigger - keeps the logic visible and testable in
+  TypeScript, at the cost of needing every future write path to remember
+  to call `recomputeClaimTotals()` (see Future Improvements).
+- **Scrubbing is advisory, not yet enforced server-side**: the claim
+  detail page disables the "Submit claim" button when scrubbing reports
+  errors, but the `PATCH /api/claims/:id/status` endpoint does not itself
+  re-run `scrubClaim()` before accepting a `submitted` transition - a
+  determined API client could submit an incomplete claim. Flagged below
+  as a Future Improvement rather than silently left unmentioned.
+- **Status lifecycle**: `draft → ready → submitted → {accepted, rejected,
+  denied}`; `rejected → draft` (revise & resubmit); `denied → {appealed,
+  closed}`; `appealed → {accepted, denied}`; `accepted → paid → closed`.
+  Every transition is recorded in `claim_status_history` regardless of
+  which columns on `claims` it also updates.
+
+## 11. Testing
+
+- `tests/validations/claims.test.ts` - claim shell date ordering,
+  diagnosis sequence bounds and ICD-10 format, procedure line CPT/HCPCS/
+  modifier format and diagnosis-pointer requirement, status-change note
+  requirements for reject/deny.
+- `tests/services/claim-scrubbing.test.ts` - the full `scrubClaim()`
+  readiness matrix: missing payer (warning only), missing diagnoses/
+  lines, malformed codes, dangling diagnosis pointers, non-positive
+  charge/units, invalid date range.
+
+## 12. Folder Structure
+
+```
+supabase/migrations/
+  00000000000017_claims_schema.sql
+  00000000000018_claims_rls.sql
+src/
+  app/(dashboard)/claims/               list, new, [id], [id]/edit
+  app/api/claims/                       8 route handlers
+  components/claims/                     table, filters, form, diagnoses/lines sections, scrub panel, status actions/history
+  components/patients/patient-claims-tab.tsx
+  components/providers/provider-claims-tab.tsx
+  lib/services/claim-service.ts
+  lib/services/claim-scrubbing.ts        pure, DB-free readiness logic
+  lib/validations/claims.ts
+tests/
+  validations/claims.test.ts
+  services/claim-scrubbing.test.ts
+```
+
+## 13. Future Improvements
+
+- **Server-side scrub enforcement**: `PATCH /api/claims/:id/status` should
+  re-run `scrubClaimById()` and reject a `submitted` transition with a 400
+  if `isReadyToSubmit` is false, instead of relying solely on the UI
+  disabling the button.
+- **Clearinghouse/payer integration**: `submitted` currently just flips a
+  status and stamps a timestamp - a real system would generate an X12
+  837 file (or call a clearinghouse API) and later ingest an 835/277 to
+  drive status automatically instead of manual buttons.
+- **Trigger-based totals**: move `recomputeClaimTotals()` into a Postgres
+  trigger on `claim_lines` insert/update/delete so every future write
+  path (including future Payment Posting writes to `paid_amount`) can't
+  forget to keep `claims.total_*` in sync.
+- **Patient insurance policy picker in the claim form**: the schema
+  supports `patient_insurance_policy_id`, but the create/edit form only
+  exposes a payer-company dropdown for now - wiring in a per-patient
+  policy picker (dependent on the selected patient) is a natural
+  follow-up once the form needs primary/secondary COB logic.
+
+---
+
 ## Local development
 
 ```bash

@@ -1,9 +1,10 @@
 "use client";
 
-import { BadgeCheck, LineChart, ReceiptText } from "lucide-react";
+import { BadgeCheck, LineChart } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProviderOverviewTab } from "@/components/providers/provider-overview-tab";
 import { ScheduleTab, type ScheduleBlockRow } from "@/components/providers/schedule-tab";
+import { ProviderClaimsTab, type ProviderClaimRow } from "@/components/providers/provider-claims-tab";
 import { UpcomingModulePlaceholder } from "@/components/shared/upcoming-module-placeholder";
 
 interface ProviderTabsProps {
@@ -19,15 +20,16 @@ interface ProviderTabsProps {
     createdAt: string;
   };
   schedule: ScheduleBlockRow[];
+  claims: ProviderClaimRow[];
 }
 
-export function ProviderTabs({ providerId, overview, schedule }: ProviderTabsProps) {
+export function ProviderTabs({ providerId, overview, schedule, claims }: ProviderTabsProps) {
   return (
     <Tabs defaultValue="overview">
       <TabsList className="flex-wrap">
         <TabsTrigger value="overview">Overview</TabsTrigger>
         <TabsTrigger value="schedule">Schedule ({schedule.length})</TabsTrigger>
-        <TabsTrigger value="claims">Claims</TabsTrigger>
+        <TabsTrigger value="claims">Claims ({claims.length})</TabsTrigger>
         <TabsTrigger value="performance">Performance &amp; Revenue</TabsTrigger>
         <TabsTrigger value="credentialing">Credentialing</TabsTrigger>
       </TabsList>
@@ -39,7 +41,7 @@ export function ProviderTabs({ providerId, overview, schedule }: ProviderTabsPro
         <ScheduleTab providerId={providerId} blocks={schedule} />
       </TabsContent>
       <TabsContent value="claims">
-        <UpcomingModulePlaceholder icon={ReceiptText} title="No claims yet" moduleName="Claims" />
+        <ProviderClaimsTab providerId={providerId} claims={claims} />
       </TabsContent>
       <TabsContent value="performance">
         <UpcomingModulePlaceholder
