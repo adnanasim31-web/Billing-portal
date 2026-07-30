@@ -58,6 +58,17 @@ export type EligibilityServiceType =
   | "other";
 export type EligibilityStatus = "active" | "inactive" | "error";
 export type PaymentMethod = "era" | "check" | "credit_card" | "cash" | "eft" | "other";
+export type DenialClaimStatus = "denied" | "rejected";
+export type DenialCategory =
+  | "eligibility"
+  | "authorization"
+  | "coding_error"
+  | "timely_filing"
+  | "duplicate_claim"
+  | "medical_necessity"
+  | "documentation"
+  | "other";
+export type DenialResolutionStatus = "open" | "in_progress" | "appealed" | "resolved" | "written_off";
 
 export interface Database {
   public: {
@@ -1116,6 +1127,47 @@ export interface Database {
           organization_id: string;
         };
         Update: Partial<Database["public"]["Tables"]["payment_allocations"]["Row"]>;
+      };
+      claim_denials: {
+        Row: {
+          id: string;
+          organization_id: string;
+          claim_id: string;
+          claim_status: DenialClaimStatus;
+          category: DenialCategory;
+          reason_detail: string | null;
+          resolution_status: DenialResolutionStatus;
+          assigned_to: string | null;
+          follow_up_date: string | null;
+          resolution_notes: string | null;
+          resolved_at: string | null;
+          created_by: string | null;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "claim_denials_claim_id_fkey";
+            columns: ["claim_id"];
+            isOneToOne: false;
+            referencedRelation: "claims";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "claim_denials_assigned_to_fkey";
+            columns: ["assigned_to"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["claim_denials"]["Row"]> & {
+          organization_id: string;
+          claim_id: string;
+          claim_status: DenialClaimStatus;
+        };
+        Update: Partial<Database["public"]["Tables"]["claim_denials"]["Row"]>;
       };
     };
     Views: Record<string, never>;

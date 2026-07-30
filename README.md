@@ -1532,6 +1532,170 @@ tests/
 
 ---
 
+# Module 10: Denial Management
+
+## 1. UI Design
+
+- **Denial worklist** (`/denials`): every open (and resolved) denial
+  event, filterable by resolution status and root-cause category. There
+  is no manual "create denial" page - entries appear here automatically,
+  the moment a claim is marked `denied` or `rejected` on its own detail
+  page (Module 7).
+- **Denial detail** (`/denials/[id]`): the claim/patient it's attached
+  to, the reason captured at denial time, and an editable worklist form -
+  root-cause category, assignee, follow-up date, resolution status, and
+  resolution notes. Read-only for anyone with `denials.view` but not
+  `denials.manage` (e.g. Auditor) - the form renders as a disabled
+  `<fieldset>` with no Save button for them.
+
+## 2. Database Tables
+
+`supabase/migrations/00000000000023` and `00000000000024`:
+
+- `claim_denials` - one row per denial/rejection **event** (not one row
+  per claim - if a claim is rejected, resubmitted, and later denied for a
+  different reason, that's two separate worklist entries, each with its
+  own audit trail). Deliberately separate from Module 7's
+  `claim_status_history` (an append-only, immutable transition log) since
+  this table needs to be *edited over time* as a biller works the denial:
+  `category`, `assigned_to`, `follow_up_date`, `resolution_status`, and
+  `resolution_notes` all change as the case progresses, and
+  `resolved_at` is stamped once `resolution_status` reaches `resolved`
+  or `written_off`.
+
+RLS reuses the `denials.view`/`denials.manage` permissions already
+seeded in Module 1's catalog (and already granted to Biller, with
+Admin/Owner covered by their broader grants and Auditor covered by its
+`%.view` wildcard) - no RBAC migration needed.
+
+### Relationships
+
+```
+claims 1---N claim_denials N---1 profiles (assigned_to)
+```
+
+## 3. Models
+
+`src/types/database.types.ts` extended with `claim_denials` and three new
+union types: `DenialClaimStatus` (`denied | rejected` - which transition
+opened this entry), `DenialCategory` (`eligibility | authorization |
+coding_error | timely_filing | duplicate_claim | medical_necessity |
+documentation | other`), and `DenialResolutionStatus` (`open |
+in_progress | appealed | resolved | written_off`).
+
+## 4. Controllers (Route Handlers)
+
+`src/app/api/denials/**` - 3 endpoints (list, get one, update). No create
+endpoint - see Business Logic below for why creation is a side effect of
+the claims status route instead.
+
+## 5. Services
+
+- `denial-service.ts` - `createDenialRecordForClaim()` (called from the
+  claims status API route, not from `claim-service.ts` itself - see
+  below), `listDenials()`/`getDenialById()` with the claim/patient/
+  assignee embedded, and `updateDenial()` which stamps `resolved_at` when
+  the new status is `resolved`/`written_off` and clears it otherwise (so
+  reopening a denial - moving it back to `in_progress` - correctly un-sets
+  the resolution timestamp).
+
+## 6. APIs
+
+| Method | URL                | Purpose                                                |
+|--------|----------------------|-----------------------------------------------------------|
+| GET    | `/api/denials`       | List worklist entries (query/status/category filters, `denials.view`) |
+| GET    | `/api/denials/:id`   | Get one entry                                              |
+| PATCH  | `/api/denials/:id`   | Update category/assignee/follow-up/resolution (`denials.manage`) |
+
+## 7. Validation
+
+`src/lib/validations/denials.ts` - `denialUpdateSchema` (requires
+resolution notes when the new status is `resolved` or `written_off`, via
+a `refine`), `denialSearchSchema` (status/category filters defaulting to
+`all`).
+
+## 8. Frontend Pages
+
+- `src/app/(dashboard)/denials/{page,[id]/page}.tsx` - no `new` page by
+  design.
+
+## 9. Components
+
+- `src/components/denials/*` - `DenialsTable`, `DenialsFilters`,
+  `DenialDetailForm`.
+
+## 10. Business Logic
+
+- **Creation lives in the API route, not the service layer**: rather
+  than having Module 7's `claim-service.ts` import from this later
+  module (a backwards dependency an earlier module shouldn't need to
+  know about), `src/app/api/claims/[id]/status/route.ts` calls
+  `createDenialRecordForClaim()` itself, right after a successful
+  `denied`/`rejected` transition, passing along the same rejection/denial
+  note the biller already typed as the initial `reason_detail`. This
+  keeps `claim-service.ts` completely unmodified and keeps the
+  dependency direction correct (a controller coordinating two services,
+  not one module reaching into a module that didn't exist when it was
+  written) - the same reasoning Module 9 used the *other* direction
+  (payment posting calling into the already-existing
+  `recomputeClaimTotals()`).
+- **One row per denial event, not per claim**: no dedupe logic checks
+  for an existing open `claim_denials` row before inserting - a claim
+  that bounces `rejected → draft → resubmitted → denied` gets two
+  worklist entries, preserving the full history of what actually
+  happened rather than collapsing it into one mutable record.
+- **Independent of the claim's own status lifecycle**: marking a denial
+  `resolved` here does **not** change the claim's status, and appealing a
+  claim (Module 7's own `appealed` transition) does not auto-update the
+  denial's `resolution_status` - the two are intentionally decoupled so
+  this module doesn't need to react to every future Claims status change
+  (see Future Improvements for the case this doesn't yet handle well).
+
+## 11. Testing
+
+- `tests/validations/denials.test.ts` - category/date format validation
+  and the resolution-notes-required-on-resolve/write-off `refine` check.
+
+## 12. Folder Structure
+
+```
+supabase/migrations/
+  00000000000023_denials_schema.sql
+  00000000000024_denials_rls.sql
+src/
+  app/(dashboard)/denials/              list, [id]
+  app/api/denials/                      3 route handlers
+  app/api/claims/[id]/status/route.ts   updated: opens a denial record on deny/reject
+  components/denials/                    table, filters, detail form
+  lib/services/denial-service.ts
+  lib/validations/denials.ts
+tests/
+  validations/denials.test.ts
+```
+
+## 13. Future Improvements
+
+- **Auto-resolve on claim outcome**: when an appealed claim later reaches
+  `paid` (Module 9's auto-paid-on-full-reconciliation) or `closed`, the
+  matching `claim_denials` row doesn't automatically flip to `resolved` -
+  a biller has to close it out by hand. Wiring this would mean either the
+  claims status route or the payment service reaching into
+  `denial-service.ts`, deliberately deferred to keep this module's first
+  version decoupled and simple.
+- **CARC/RARC-coded categories**: `category` is a small fixed enum, not
+  the real X12 Claim Adjustment Reason Code / Remittance Advice Remark
+  Code taxonomy a production clearinghouse integration (Module 9's own
+  Future Improvement) would eventually populate automatically from an
+  835's adjustment segments.
+- **Overdue follow-up alerting**: `follow_up_date` is stored and
+  filterable but nothing surfaces "this is overdue" - no dashboard widget
+  or notification yet flags a denial whose follow-up date has passed.
+- **Bulk assignment**: denials are assigned one at a time from the detail
+  page; a real worklist would let a supervisor bulk-assign a batch to a
+  biller from the list view.
+
+---
+
 ## Local development
 
 ```bash

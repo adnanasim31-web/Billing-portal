@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  AlertOctagon,
   BadgeCheck,
   CalendarClock,
   FileStack,
@@ -32,6 +33,7 @@ export const PRIMARY_NAV: NavItem[] = [
   { label: "Eligibility", href: "/eligibility", icon: BadgeCheck, enabled: true },
   { label: "Insurance", href: "/insurance", icon: ShieldAlert, enabled: true },
   { label: "Payments", href: "/payments", icon: Wallet, enabled: true },
+  { label: "Denials", href: "/denials", icon: AlertOctagon, enabled: true },
   { label: "Appointments", href: "/appointments", icon: CalendarClock, enabled: true },
   { label: "Coding Library", href: "/coding", icon: LibraryBig, enabled: true },
   { label: "Providers", href: "/providers", icon: Stethoscope, enabled: true },

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser, hasPermission } from "@/lib/services/current-user-service";
 import { changeClaimStatus } from "@/lib/services/claim-service";
+import { createDenialRecordForClaim } from "@/lib/services/denial-service";
 import { claimStatusChangeSchema } from "@/lib/validations/claims";
 import { PERMISSIONS } from "@/lib/constants/permissions";
 
@@ -32,6 +33,17 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       actingUserId: user.id,
       input: parsed.data,
     });
+
+    if (parsed.data.status === "denied" || parsed.data.status === "rejected") {
+      await createDenialRecordForClaim({
+        organizationId: user.organizationId,
+        claimId: id,
+        claimStatus: parsed.data.status,
+        reasonDetail: parsed.data.note,
+        createdBy: user.id,
+      });
+    }
+
     return NextResponse.json(claim);
   } catch (error) {
     return NextResponse.json(
