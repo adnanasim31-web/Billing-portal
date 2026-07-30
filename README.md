@@ -74,9 +74,10 @@ Light and dark themes are both implemented via CSS variables in
   content area with rounded (14px) cards and soft shadows - directly
   inspired by the reference screenshot's KPI/chart layout, restyled to be
   cleaner and less dense (Kareo/AdvancedMD/Stripe-Dashboard influence).
-  The dashboard page itself ships with **sample data** - live KPIs arrive
-  with the Claims/Reports modules; it exists here to establish the visual
-  system and prove out the sidebar/navbar/card/chart primitives.
+  The dashboard page shipped with placeholder sample data in Module 1, to
+  establish the visual system before the Claims/Payments/Denials/AR/Reports
+  modules existed to supply real numbers. It was rewired to fully live data
+  once those modules shipped - see "Dashboard: live data" below.
 - **Settings**: tabbed Profile / Security / Team Members / Roles &
   Permissions pages.
 
@@ -2873,6 +2874,80 @@ tests/
 - **No recurring tasks or subtasks**: each task is a flat, one-time item.
 - **No bulk actions**: tasks are created/edited/status-changed one at a
   time; there's no multi-select "mark 5 tasks done" from the list view.
+
+---
+
+# Dashboard: Live Data Refactor
+
+The Module 1 dashboard shipped with hardcoded placeholder KPIs/charts,
+before any module existed to supply real numbers. With Claims, Payments,
+Denials, AR, and Reports all live, `src/app/(dashboard)/dashboard/page.tsx`
+was rewritten to compute everything from the database - no fabricated
+values remain. This isn't a new numbered module (no new tables, RLS, or
+permissions); it's a refactor of the existing dashboard route reusing
+each module's own service layer.
+
+## What changed
+
+- **MTD Billed / MTD Collected**: `getReportsSummary()` (Module 12) is
+  called twice - once for the current month-to-date range, once for the
+  same day-count last month - and the relative % change is derived from
+  the two. If last month's figure is `0` (a brand-new organization), the
+  change badge is omitted rather than showing a fabricated trend.
+- **Outstanding AR**: `ar-service.ts` gained `getArOverview()`, returning
+  the total open balance, claim count, and average days outstanding
+  across all aging buckets. There's no historical AR snapshot to diff
+  against, so this KPI never shows a change badge - `KpiCard`'s
+  `changePercent` prop is now optional for exactly this reason.
+- **Denial Rate**: same current-vs-previous-month comparison as billing,
+  using `getReportsSummary()`'s `denialRate` and `denialCategorySummary`;
+  the change badge shows the percentage-point difference, not a relative
+  %, and is omitted when last month billed zero claims.
+- **Needs-attention banner**: `denial-service.ts` gained
+  `countActiveDenials()` (denials not yet `resolved`/`written_off`). The
+  banner only renders when the count is greater than zero - no more
+  always-on placeholder alert.
+- **Monthly Billing Volume chart**: `report-service.ts` gained
+  `getMonthlyBillingTrend()`, which runs `fetchClaimsInRange()` +
+  `summarizeCollections()` (both already existing Reports internals) over
+  each of the last 6 calendar months in parallel.
+- **Claim Status Mix chart**: `report-service.ts` gained
+  `getAllTimeClaimsStatusCounts()`, a simple all-time count-by-status
+  query (deliberately not date-scoped, unlike the billing trend). The
+  dashboard page groups the 9 raw `ClaimStatus` values into the 5 buckets
+  the donut displays (Paid / Pending / Denied / In Review / Closed).
+- **`RevenueChart` and `ClaimStatusDonut`** no longer own their data - both
+  now take a `data` prop instead of an internal hardcoded array.
+  `ClaimStatusDonut` renders an `EmptyState` when total claims is `0`.
+
+## What a brand-new organization sees
+
+With zero claims/payments/denials posted, every KPI reads `$0` or `0.0%`
+with no change badge (there's no prior-month baseline to compare against),
+the needs-attention banner is hidden entirely, the Monthly Billing Volume
+chart still renders 6 real month labels with every bar at zero height, and
+the Claim Status Mix card shows an empty state ("No claims yet") instead
+of a donut with nothing to plot.
+
+## Testing
+
+No new pure-logic function was introduced - the new service functions
+either compose existing, already-tested aggregation helpers
+(`summarizeCollections`, `summarizeAging`) or are simple Postgrest
+queries/counts too thin to warrant a unit test on their own. Full
+typecheck/lint/existing 217-test suite pass unchanged.
+
+## Files changed
+
+```
+src/app/(dashboard)/dashboard/page.tsx   rewritten - real data, no placeholders
+src/components/dashboard/kpi-card.tsx    changePercent made optional
+src/components/dashboard/revenue-chart.tsx      DATA -> data prop
+src/components/dashboard/claim-status-donut.tsx DATA -> data prop, empty state
+src/lib/services/ar-service.ts           + getArOverview()
+src/lib/services/denial-service.ts       + countActiveDenials()
+src/lib/services/report-service.ts       + getMonthlyBillingTrend(), getAllTimeClaimsStatusCounts()
+```
 
 ---
 

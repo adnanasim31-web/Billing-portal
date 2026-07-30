@@ -1,7 +1,12 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { recordAuditLog } from "@/lib/services/audit-service";
-import { getAgingBucketDateRange, summarizeAging, type AgingBucket } from "@/lib/services/ar-aging";
+import {
+  calculateDaysOutstanding,
+  getAgingBucketDateRange,
+  summarizeAging,
+  type AgingBucket,
+} from "@/lib/services/ar-aging";
 import type { ArNoteInput } from "@/lib/validations/ar";
 
 const AR_CLAIM_SELECT =
@@ -66,6 +71,38 @@ export async function getArAgingSummary(organizationId: string) {
     })),
     today
   );
+}
+
+export interface ArOverview {
+  totalBalance: number;
+  claimCount: number;
+  averageDaysOutstanding: number;
+}
+
+/** Used by the dashboard - total open AR balance plus average age, across all buckets. */
+export async function getArOverview(organizationId: string): Promise<ArOverview> {
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("claims")
+    .select("balance_amount, submitted_at, service_date_from")
+    .eq("organization_id", organizationId)
+    .not("status", "in", UNBILLED_STATUSES)
+    .gt("balance_amount", 0);
+  if (error) throw error;
+
+  const claims = data ?? [];
+  const today = new Date().toISOString().slice(0, 10);
+  const totalBalance = claims.reduce((sum, c) => sum + Number(c.balance_amount), 0);
+  const totalDays = claims.reduce((sum, c) => {
+    const anchor = c.submitted_at ? c.submitted_at.slice(0, 10) : c.service_date_from;
+    return sum + calculateDaysOutstanding(anchor, today);
+  }, 0);
+
+  return {
+    totalBalance,
+    claimCount: claims.length,
+    averageDaysOutstanding: claims.length > 0 ? totalDays / claims.length : 0,
+  };
 }
 
 export async function listArNotesForClaim(claimId: string, organizationId: string) {

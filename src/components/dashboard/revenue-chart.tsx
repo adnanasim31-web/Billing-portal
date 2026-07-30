@@ -2,19 +2,15 @@
 
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-const DATA = [
-  { month: "Feb", amount: 298000 },
-  { month: "Mar", amount: 312000 },
-  { month: "Apr", amount: 287000 },
-  { month: "May", amount: 341000 },
-  { month: "Jun", amount: 356000 },
-  { month: "Jul", amount: 184200 },
-];
+export interface RevenueChartDatum {
+  month: string;
+  amount: number;
+}
 
-export function RevenueChart() {
+export function RevenueChart({ data }: { data: RevenueChartDatum[] }) {
   return (
     <ResponsiveContainer width="100%" height={220}>
-      <BarChart data={DATA} barCategoryGap="28%">
+      <BarChart data={data} barCategoryGap="28%">
         <XAxis
           dataKey="month"
           axisLine={false}
