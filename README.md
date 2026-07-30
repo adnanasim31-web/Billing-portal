@@ -2184,6 +2184,439 @@ tests/
 
 ---
 
+# Module 14: Documents
+
+A general, organization-wide document library - contracts, payer
+agreements, compliance policies - distinct from Module 2's
+`patient_documents`, which is patient-specific and stays exactly as it
+was.
+
+## 1. UI Design
+
+- **Documents** (`/documents`): a filterable list (by category and file
+  name), an upload button with a category picker, and per-document
+  download/upload-new-version/delete actions.
+
+## 2. Database Tables
+
+`supabase/migrations/00000000000029` and `00000000000030`:
+
+- `documents` - file metadata (name, path, size, MIME type, category),
+  optionally tagged to a `patient`/`provider`/`claim` via
+  `entity_type`/`entity_id` (a `check` constraint enforces both are null
+  or both are set - deliberately not a real FK, since it can point at
+  three different tables depending on `entity_type`, the same reasoning
+  Module 6's `coding_favorites.code` used for the same shape of problem).
+  Versioning is a simple chain: uploading a new version sets the
+  previous row's `is_current` to `false` and inserts a new row pointing
+  back via `replaces_document_id` - the current version is always
+  `is_current = true`.
+- **`organization-documents` Storage bucket** - private, path convention
+  `{organization_id}/{category}/{uuid}-{filename}`, mirroring Module 2's
+  `patient-documents` bucket exactly (signed upload/download URLs, file
+  bytes never touch the Next.js server).
+
+RLS reuses the `documents.view`/`documents.manage` permissions already
+seeded in Module 1 - the same pair Module 2's `patient_documents` storage
+policies already used, confirming "documents" was always meant to be one
+permission domain covering every document surface in the app, not just
+patient files.
+
+### Relationships
+
+```
+documents N---1 profiles (uploaded_by)
+documents N---1 documents (replaces_document_id, self-referential version chain)
+```
+
+## 3. Models
+
+`src/types/database.types.ts` extended with `documents` and two new union
+types: `OrgDocumentCategory` (`contract | policy | payer_agreement |
+compliance | provider_credential | other`) and `OrgDocumentEntityType`
+(`patient | provider | claim`).
+
+## 4. Controllers (Route Handlers)
+
+`src/app/api/documents/**` - 4 route files, 6 handlers (list/create,
+upload-url, get-download-url/delete, new-version).
+
+## 5. Services
+
+- `document-service.ts` - mirrors `patient-document-service.ts`'s signed
+  URL pattern almost exactly (`buildDocumentStoragePath()`,
+  `createSignedUploadUrl()`, `getSignedDownloadUrl()`), plus
+  `createDocumentVersion()`, which is the one genuinely new piece: it
+  supersedes the previous row (`is_current = false`) and inserts the new
+  version carrying forward the previous row's category/entity tag.
+
+## 6. APIs
+
+| Method | URL                          | Purpose                                            |
+|--------|--------------------------------|--------------------------------------------------------|
+| GET    | `/api/documents`                | List current documents (query/category filters, `documents.view`) |
+| POST   | `/api/documents`                | Record uploaded file metadata (`documents.manage`)       |
+| POST   | `/api/documents/upload-url`     | Issue a signed Storage upload URL (`documents.manage`)    |
+| GET    | `/api/documents/:id`             | Issue a signed download URL (`documents.view`)            |
+| DELETE | `/api/documents/:id`             | Delete a document + its Storage object (`documents.manage`) |
+| POST   | `/api/documents/:id/versions`   | Upload a new version, superseding this one (`documents.manage`) |
+
+## 7. Validation
+
+`src/lib/validations/documents.ts` - `documentMetaSchema` (category enum
+defaulting to `other`, optional entity tag, positive file size),
+`documentSearchSchema` (category filter defaulting to `all`).
+
+## 8. Frontend Pages
+
+- `src/app/(dashboard)/documents/page.tsx` - the only page.
+
+## 9. Components
+
+- `src/components/documents/*` - `DocumentsFilters`, `DocumentsList`
+  (owns the entire upload/download/version/delete flow as one client
+  component, the same shape as Module 2's `documents-tab.tsx`).
+
+## 10. Business Logic
+
+- **Version chain via a self-referential FK, not a separate table**:
+  `replaces_document_id` pointing back into `documents` itself keeps the
+  full history queryable (walk the chain backward) without a parallel
+  `document_versions` table - simpler for what this module needs, at the
+  cost of one extra `is_current` filter on every "give me the current
+  files" query.
+- **Entity tagging is optional and unenforced beyond the pairing check**:
+  a document doesn't have to be tagged to anything (a general compliance
+  policy isn't "about" any single patient/provider/claim); when it is
+  tagged, the database only enforces that both columns are set together,
+  not that the referenced row actually exists - deliberately deferred (see
+  Future Improvements), matching how `coding_favorites.code` handles the
+  same polymorphic-reference tradeoff.
+
+## 11. Testing
+
+- `tests/validations/documents.test.ts` - category defaults, file-size
+  validation, entity-tag validation.
+
+## 12. Folder Structure
+
+```
+supabase/migrations/
+  00000000000029_documents_schema.sql
+  00000000000030_documents_rls.sql
+src/
+  app/(dashboard)/documents/page.tsx
+  app/api/documents/                    4 route files, 6 handlers
+  components/documents/                  filters, list (upload/download/version/delete)
+  lib/services/document-service.ts
+  lib/validations/documents.ts
+tests/
+  validations/documents.test.ts
+```
+
+## 13. Future Improvements
+
+- **No UI for entity tagging**: the schema supports tagging a document to
+  a patient/provider/claim, but the upload dialog doesn't expose that
+  picker yet - deliberately deferred to keep the v1 upload flow simple;
+  a natural follow-up is surfacing it contextually (e.g. an "Attach
+  document" action directly on a provider's or claim's own page).
+- **No referential integrity on `entity_id`**: since it's polymorphic,
+  nothing stops a document from pointing at a deleted patient/provider/
+  claim - a real system might use a trigger to null it out on delete, the
+  same class of problem `coding_favorites` already has.
+- **No full-text search or OCR**: the permission catalog's own
+  description ("View uploaded documents and OCR results") implies OCR
+  extraction; this module only stores the file itself, with no text
+  extraction or search-by-content.
+
+---
+
+# Module 15: Messaging
+
+An internal team message board - named channels holding a flat,
+chronological list of messages. Deliberately not a full 1:1/DM chat
+product; see Business Logic for why.
+
+## 1. UI Design
+
+- **Messages** (`/messages`): a channel sidebar (create new channels
+  inline) and a message pane for the selected channel with a compose box.
+  No realtime/websockets - sending a message reloads that channel's list;
+  a manual refresh button is also available.
+
+## 2. Database Tables
+
+`supabase/migrations/00000000000031` and `00000000000032`:
+
+- `message_channels` - named channels per organization (`unique
+  (organization_id, name)`), e.g. "General", "Billing", "Front Desk".
+- `messages` - flat, chronological messages within a channel - no
+  threading, no reactions, no read receipts.
+
+RLS reuses the single `messaging.use` permission already seeded in
+Module 1's catalog. Unlike every other module, there is no separate
+view/manage split in the permission catalog itself - `messaging.use`
+alone gates reading, posting, *and* channel creation, since the catalog
+never defined a `messaging.manage` to gate channel creation more tightly.
+
+### Relationships
+
+```
+message_channels 1---N messages N---1 profiles (author_id)
+```
+
+## 3. Models
+
+`src/types/database.types.ts` extended with `message_channels` and
+`messages` - no new union types needed (no enum-like columns).
+
+## 4. Controllers (Route Handlers)
+
+`src/app/api/messages/**` - 2 route files, 4 handlers (list/create
+channels, list/post messages within a channel).
+
+## 5. Services
+
+- `messaging-service.ts` - straightforward CRUD: list channels, create a
+  channel (translating a unique-name collision into a friendly error),
+  list a channel's messages (capped at 200, oldest-first), post a
+  message.
+
+## 6. APIs
+
+| Method | URL                                        | Purpose                                    |
+|--------|-----------------------------------------------|-------------------------------------------------|
+| GET    | `/api/messages/channels`                      | List channels (`messaging.use`)                  |
+| POST   | `/api/messages/channels`                      | Create a channel (`messaging.use`)               |
+| GET    | `/api/messages/channels/:channelId/messages`  | List a channel's messages (`messaging.use`)      |
+| POST   | `/api/messages/channels/:channelId/messages`  | Post a message (`messaging.use`)                 |
+
+## 7. Validation
+
+`src/lib/validations/messaging.ts` - `channelSchema` (required name, max
+80 chars), `messageSchema` (required body, max 4000 chars).
+
+## 8. Frontend Pages
+
+- `src/app/(dashboard)/messages/page.tsx` - the only page; fetches the
+  initial channel list server-side and hands off to a client workspace
+  for everything interactive.
+
+## 9. Components
+
+- `src/components/messaging/messages-workspace.tsx` - one client
+  component owning channel selection, message loading, sending, and
+  channel creation (a "New channel" dialog).
+
+## 10. Business Logic
+
+- **A message board, not a chat app, by deliberate scope choice**: the
+  permission catalog's description ("Send/receive internal chat and
+  announcements") could support either a full DM/group-conversation
+  product or a simpler shared-channel model. Given this is a practice-
+  management/RCM context (announcements about payer policy changes,
+  system downtime, front-desk coordination) rather than a consumer chat
+  product, and given effort budget, a flat shared-channel board was
+  chosen - every channel is visible to everyone with `messaging.use`
+  (there's no per-channel membership/privacy model).
+- **No realtime**: without websockets or Supabase Realtime wired in,
+  new messages from other users only appear on a manual refresh or after
+  you send your own message - explicitly not simulated as "live" to
+  avoid implying a capability that isn't actually there.
+- **No channel deletion/archiving**: channels, once created, are
+  permanent - there's no equivalent of Denials'/AR's careful "what can be
+  edited vs. what's append-only" distinction here because the whole
+  module is intentionally minimal.
+
+## 11. Testing
+
+- `tests/validations/messaging.test.ts` - channel name and message body
+  length/emptiness validation.
+
+## 12. Folder Structure
+
+```
+supabase/migrations/
+  00000000000031_messaging_schema.sql
+  00000000000032_messaging_rls.sql
+src/
+  app/(dashboard)/messages/page.tsx
+  app/api/messages/                      2 route files, 4 handlers
+  components/messaging/messages-workspace.tsx
+  lib/services/messaging-service.ts
+  lib/validations/messaging.ts
+tests/
+  validations/messaging.test.ts
+```
+
+## 13. Future Improvements
+
+- **Realtime delivery**: the single biggest gap - wiring up Supabase
+  Realtime (or polling) so messages appear for other users without a
+  manual refresh is the natural next step for this module specifically.
+- **Direct/private messages**: today everything is a shared channel; a
+  real internal chat product would eventually want 1:1 or small-group
+  private conversations, which is a materially different data model
+  (participants table, per-conversation read state) deliberately not
+  attempted here.
+- **Threading, reactions, read receipts**: all absent, consistent with
+  the "flat message board" scope decision.
+- **`messaging.manage`**: the permission catalog has no separate
+  channel-management permission, so anyone who can message can also
+  create channels; a real deployment might want channel creation
+  restricted to admins.
+
+---
+
+# Module 16: Billing & Plan
+
+The organization's own subscription tier - extends the `organizations`
+row from Module 1 (which already had `trial_ends_at`/`is_active`)
+rather than introducing a new table, since an organization has exactly
+one subscription.
+
+## 1. UI Design
+
+- **Billing & Plan** (`/billing`): a "Current plan" summary card (tier,
+  billing cycle, seats included, status, trial end date if trialing),
+  followed by a three-tier plan comparison grid (Starter/Professional/
+  Enterprise) with a monthly/annual toggle and a "Switch to this plan"
+  button per card. A banner states plainly: **"Demo mode: switching
+  plans here updates your organization's tier immediately - no payment is
+  processed and no card is charged."**
+
+**Why stated this explicitly**: there is no real payment processor (e.g.
+Stripe) wired into this app - building one would require real API keys/
+secrets this environment doesn't have, and fabricating fake invoice
+history or a checkout flow that looks like it processes payment would be
+actively misleading. So this module does the honest version: a real,
+working plan-tier switch with no pretense of moving real money.
+
+## 2. Database Tables
+
+`supabase/migrations/00000000000033` - no new table, an `alter table` on
+`organizations` adding `plan_tier` (`starter`/`professional`/
+`enterprise`), `billing_cycle` (`monthly`/`annual`), `seats_included`,
+and `subscription_status` (`trialing`/`active`/`past_due`/`canceled`).
+No RLS migration needed - `organizations` already has RLS from Module 1,
+and (consistent with every other module in this app) the real
+enforcement is the API route's `hasPermission()` check, not a new
+row-level policy.
+
+`subscription.view`/`subscription.manage` were already seeded in Module
+1's catalog and already had real semantics baked in from day one: Owner
+has both; Admin has `subscription.view` (via its "everything except
+`subscription.manage`/`organization.admin`" grant) but not
+`subscription.manage` - so an Admin can see the current plan but only an
+Owner can actually change it, a real-world distinction (Admins run
+day-to-day operations; only the practice owner controls the bill) this
+module required no new grants to express.
+
+## 3. Models
+
+`src/types/database.types.ts`: `organizations.Row` gained
+`plan_tier`/`billing_cycle`/`seats_included`/`subscription_status`, plus
+three new union types (`PlanTier`, `BillingCycle`, `SubscriptionStatus`).
+
+## 4. Controllers (Route Handlers)
+
+`src/app/api/organization/subscription/route.ts` - 2 handlers (get,
+change plan).
+
+## 5. Services
+
+- `subscription-service.ts` - `getOrganizationSubscription()` and
+  `changeSubscriptionPlan()` (updates tier/cycle, resets
+  `seats_included` to the new tier's default from the plan catalog, and
+  sets `subscription_status` to `active`).
+
+## 6. APIs
+
+| Method | URL                              | Purpose                                          |
+|--------|-------------------------------------|-------------------------------------------------------|
+| GET    | `/api/organization/subscription`    | Get the current plan/status (`subscription.view`)        |
+| PATCH  | `/api/organization/subscription`    | Change plan tier/billing cycle (`subscription.manage`)   |
+
+## 7. Validation
+
+`src/lib/validations/subscription.ts` - `changePlanSchema` (plan tier +
+billing cycle enums, both required).
+
+## 8. Frontend Pages
+
+- `src/app/(dashboard)/billing/page.tsx` - the only page.
+
+## 9. Components
+
+- `src/components/billing/plan-comparison.tsx` - the interactive
+  three-card grid with the billing-cycle toggle and switch-plan buttons
+  (hidden/disabled entirely for viewers without `subscription.manage`,
+  same "don't even render the control" pattern Module 13 used for its
+  Credentialing tab).
+- `src/lib/constants/subscription-plans.ts` - the static plan catalog
+  (name, monthly/annual price, included seats, feature list) driving both
+  the comparison grid and the server-side seat-count update.
+
+## 10. Business Logic
+
+- **No real payment processing, stated everywhere it matters**: the UI
+  banner, this README, and the column comment on
+  `organizations.subscription_status` in the migration itself all say
+  the same thing, so nobody - not a future contributor, not a user
+  reading the deployed app - mistakes this for a real billing system.
+- **Plan catalog as a single source of truth**: `PLAN_CATALOG` in
+  `subscription-plans.ts` drives both what the UI displays and what
+  `seats_included` gets set to server-side on a plan change, so the two
+  can never drift apart the way they would if the UI hard-coded numbers
+  separately from the API.
+- **Permission-gated control, not just gated visibility**: an Admin (who
+  has `subscription.view` but not `subscription.manage`) sees the exact
+  same comparison grid an Owner does, just without any switch-plan
+  buttons rendered - consistent with how this app has handled
+  view-vs-manage splits everywhere else (e.g. Denials' disabled
+  `<fieldset>`), rather than hiding the whole page.
+
+## 11. Testing
+
+- `tests/validations/subscription.test.ts` - plan tier and billing cycle
+  enum validation.
+
+## 12. Folder Structure
+
+```
+supabase/migrations/
+  00000000000033_subscription_columns.sql
+src/
+  app/(dashboard)/billing/page.tsx
+  app/api/organization/subscription/route.ts
+  components/billing/plan-comparison.tsx
+  lib/constants/subscription-plans.ts
+  lib/services/subscription-service.ts
+  lib/validations/subscription.ts
+tests/
+  validations/subscription.test.ts
+```
+
+## 13. Future Improvements
+
+- **Real payment processor integration**: a production version of this
+  module would integrate Stripe (or similar) for actual card charges,
+  webhooks-driven `subscription_status` updates (e.g. `past_due` on a
+  failed charge), and real invoice history - none of which exists here,
+  by design, given the lack of real payment credentials in this
+  environment.
+- **Seat enforcement**: `seats_included` is stored and shown, but nothing
+  actually stops an organization from inviting more users than their
+  plan allows (Module 1's `users.manage`/invite flow doesn't check this
+  module's seat count) - wiring that check is a natural follow-up.
+- **Downgrade guardrails**: switching to a lower tier doesn't check
+  whether the organization is currently using features the new tier
+  doesn't include (e.g. more seats already in use than the new tier's
+  `seats_included`) - a real system would warn or block on that.
+
+---
+
 ## Local development
 
 ```bash

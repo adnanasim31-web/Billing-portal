@@ -41,7 +41,7 @@ export const PRIMARY_NAV: NavItem[] = [
   { label: "Credentialing", href: "/credentialing", icon: ShieldCheck, enabled: true },
   { label: "Accounts Receivable", href: "/ar", icon: Gauge, enabled: true },
   { label: "Reports", href: "/reports", icon: LineChart, enabled: true },
-  { label: "Documents", href: "/documents", icon: FileStack, enabled: false },
-  { label: "Messages", href: "/messages", icon: MessagesSquare, enabled: false },
-  { label: "Billing & Plan", href: "/billing", icon: Receipt, enabled: false },
+  { label: "Documents", href: "/documents", icon: FileStack, enabled: true },
+  { label: "Messages", href: "/messages", icon: MessagesSquare, enabled: true },
+  { label: "Billing & Plan", href: "/billing", icon: Receipt, enabled: true },
 ];

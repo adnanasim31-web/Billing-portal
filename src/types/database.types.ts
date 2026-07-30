@@ -79,6 +79,11 @@ export type CredentialType =
   | "w9"
   | "other";
 export type CredentialStatus = "active" | "expired" | "pending_renewal" | "revoked";
+export type OrgDocumentCategory = "contract" | "policy" | "payer_agreement" | "compliance" | "provider_credential" | "other";
+export type OrgDocumentEntityType = "patient" | "provider" | "claim";
+export type PlanTier = "starter" | "professional" | "enterprise";
+export type BillingCycle = "monthly" | "annual";
+export type SubscriptionStatus = "trialing" | "active" | "past_due" | "canceled";
 
 export interface Database {
   public: {
@@ -101,6 +106,10 @@ export interface Database {
           timezone: string;
           is_active: boolean;
           trial_ends_at: string | null;
+          plan_tier: PlanTier;
+          billing_cycle: BillingCycle;
+          seats_included: number;
+          subscription_status: SubscriptionStatus;
           created_at: string;
           updated_at: string;
         };
@@ -1244,6 +1253,97 @@ export interface Database {
           credential_type: CredentialType;
         };
         Update: Partial<Database["public"]["Tables"]["provider_credentials"]["Row"]>;
+      };
+      documents: {
+        Row: {
+          id: string;
+          organization_id: string;
+          file_name: string;
+          file_path: string;
+          file_size: number;
+          mime_type: string;
+          category: OrgDocumentCategory;
+          entity_type: OrgDocumentEntityType | null;
+          entity_id: string | null;
+          version: number;
+          replaces_document_id: string | null;
+          is_current: boolean;
+          notes: string | null;
+          uploaded_by: string | null;
+          created_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "documents_replaces_document_id_fkey";
+            columns: ["replaces_document_id"];
+            isOneToOne: false;
+            referencedRelation: "documents";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "documents_uploaded_by_fkey";
+            columns: ["uploaded_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["documents"]["Row"]> & {
+          organization_id: string;
+          file_name: string;
+          file_path: string;
+          file_size: number;
+          mime_type: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["documents"]["Row"]>;
+      };
+      message_channels: {
+        Row: {
+          id: string;
+          organization_id: string;
+          name: string;
+          description: string | null;
+          created_by: string | null;
+          created_at: string;
+        };
+        Relationships: [];
+        Insert: Partial<Database["public"]["Tables"]["message_channels"]["Row"]> & {
+          organization_id: string;
+          name: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["message_channels"]["Row"]>;
+      };
+      messages: {
+        Row: {
+          id: string;
+          organization_id: string;
+          channel_id: string;
+          author_id: string | null;
+          body: string;
+          created_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "messages_channel_id_fkey";
+            columns: ["channel_id"];
+            isOneToOne: false;
+            referencedRelation: "message_channels";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "messages_author_id_fkey";
+            columns: ["author_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["messages"]["Row"]> & {
+          organization_id: string;
+          channel_id: string;
+          body: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["messages"]["Row"]>;
       };
     };
     Views: Record<string, never>;
