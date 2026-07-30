@@ -22,6 +22,8 @@ export const PERMISSIONS = {
   CLAIMS_MANAGE: "claims.manage",
   CLAIMS_SUBMIT: "claims.submit",
   CLAIMS_APPEAL: "claims.appeal",
+  ELIGIBILITY_VIEW: "eligibility.view",
+  ELIGIBILITY_RUN: "eligibility.run",
 } as const;
 
 export type PermissionSlug = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

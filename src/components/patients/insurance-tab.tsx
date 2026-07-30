@@ -4,7 +4,8 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
-import { Loader2, Plus, ShieldPlus, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { BadgeCheck, Loader2, Plus, ShieldPlus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { patientInsuranceSchema, type PatientInsuranceInput } from "@/lib/validations/patients";
 import { Button } from "@/components/ui/button";
@@ -118,7 +119,13 @@ export function InsuranceTab({ patientId, policies }: { patientId: string; polic
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <Button size="sm" variant="outline" asChild>
+          <Link href={`/eligibility/new?patientId=${patientId}`}>
+            <BadgeCheck className="h-4 w-4" />
+            Check eligibility
+          </Link>
+        </Button>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button size="sm">

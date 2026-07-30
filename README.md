@@ -1188,6 +1188,167 @@ tests/
 
 ---
 
+# Module 8: Eligibility Verification
+
+## 1. UI Design
+
+- **Eligibility list** (`/eligibility`): a history of every check run,
+  filterable by patient name and status (Active/Inactive/Error).
+- **Run a check** (`/eligibility/new`): pick a patient (and optionally a
+  rendering provider + service type), submit, and land directly on the
+  result. Reachable from the list page and, more usefully, from a "Check
+  eligibility" shortcut on the patient profile's Insurance tab
+  (`/eligibility/new?patientId=...`) - the same pre-fill pattern used for
+  Appointments and Claims.
+- **Result detail** (`/eligibility/[id]`): a snapshot card showing the
+  computed status plus the payer/plan/copay/coverage-window data the
+  check was based on.
+
+**Important framing, stated plainly**: this module verifies coverage
+against the insurance policy **already on file** in this system (its
+`is_active` flag and effective/termination dates) - it does **not** call a
+real payer or clearinghouse. A production RCM system would submit an X12
+270 eligibility request and parse the payer's 271 response; that
+integration doesn't exist here (see Future Improvements). Every result
+page and the README say this explicitly so it's never mistaken for a live
+payer confirmation.
+
+## 2. Database Tables
+
+`supabase/migrations/00000000000019` and `00000000000020`:
+
+- `eligibility_checks` - an **immutable** snapshot per check: which
+  patient/policy/provider/service type was checked, the computed
+  `status` (`active`/`inactive`/`error`), and a copy of the payer name,
+  plan name, policy number, copay, and effective/termination dates *as
+  they were at check time* - so a later edit to the patient's policy
+  doesn't rewrite history. `checked_by`/`checked_at` complete the audit
+  trail. There is no update/delete path - only insert and select RLS
+  policies exist, unlike every other module's tables.
+
+RLS reuses the `eligibility.view`/`eligibility.run` permissions already
+seeded in Module 1's permission catalog (and already granted to Biller
+and Front Desk) - no RBAC migration needed.
+
+### Relationships
+
+```
+patients 1---N eligibility_checks N---1 providers (optional)
+eligibility_checks N---1 patient_insurance_policies (nullable - the policy snapshotted)
+```
+
+## 3. Models
+
+`src/types/database.types.ts` extended with `eligibility_checks` and two
+new union types: `EligibilityStatus` (`active | inactive | error`) and
+`EligibilityServiceType` (`general | specialist | behavioral_health |
+urgent_care | telehealth | other`).
+
+## 4. Controllers (Route Handlers)
+
+`src/app/api/eligibility/**` - 3 endpoints (list, create, get one).
+
+## 5. Services
+
+- `eligibility-coverage.ts` - **pure, DB-free** `computeCoverageStatus()`,
+  deliberately separated from `eligibility-service.ts` so it's cheap to
+  unit test (same split as Module 7's `claim-scrubbing.ts`). Given a
+  policy snapshot and today's date: no policy → `error`; policy marked
+  inactive, not yet effective, or already terminated → `inactive` (each
+  with an explanatory note); otherwise → `active`.
+- `eligibility-service.ts` - resolves which policy to check (an explicit
+  `patientInsurancePolicyId`, or the patient's active primary-ranked
+  policy if none was specified), calls `computeCoverageStatus()`, and
+  inserts the immutable snapshot row.
+
+## 6. APIs
+
+| Method | URL                     | Purpose                                              |
+|--------|---------------------------|---------------------------------------------------------|
+| GET    | `/api/eligibility`        | List checks (query/status filters, `eligibility.view`)   |
+| POST   | `/api/eligibility`        | Run a new check (`eligibility.run`)                      |
+| GET    | `/api/eligibility/:id`    | Get one check's snapshot                                 |
+
+## 7. Validation
+
+`src/lib/validations/eligibility.ts` - `eligibilityCheckSchema` (patient
+required, provider/policy optional UUIDs, service type enum defaulting to
+`general`), `eligibilitySearchSchema` (status filter defaulting to `all`).
+
+## 8. Frontend Pages
+
+- `src/app/(dashboard)/eligibility/{page,new/page,[id]/page}.tsx` - no
+  edit page, since results are immutable snapshots.
+
+## 9. Components
+
+- `src/components/eligibility/*` - `EligibilityTable`,
+  `EligibilityFilters`, `EligibilityCheckForm`.
+- `src/components/patients/insurance-tab.tsx` - gained a "Check
+  eligibility" button next to "Add insurance".
+
+## 10. Business Logic
+
+- **Snapshot, not a live reference**: every field that could change later
+  (payer name, plan, copay, coverage dates) is copied onto the
+  `eligibility_checks` row at check time rather than joined live from
+  `patient_insurance_policies` - so historical checks stay accurate even
+  after the patient's policy is edited or superseded.
+- **Policy resolution**: if the caller doesn't specify which policy to
+  check, the service defaults to the patient's active policy with the
+  lowest rank (primary before secondary before tertiary) - the policy
+  that would actually be billed first.
+- **No live payer call**: `status` is derived entirely from data already
+  in this system, not a real X12 270/271 round-trip - stated explicitly
+  in the UI, this README, and Future Improvements so it's never confused
+  with a real-time payer confirmation.
+
+## 11. Testing
+
+- `tests/validations/eligibility.test.ts` - schema defaults and UUID/enum
+  validation.
+- `tests/services/eligibility-coverage.test.ts` - the full
+  `computeCoverageStatus()` matrix: no policy, inactive policy, no
+  coverage window, not-yet-effective, already-terminated, and
+  boundary-date (exact effective/termination day) cases.
+
+## 12. Folder Structure
+
+```
+supabase/migrations/
+  00000000000019_eligibility_schema.sql
+  00000000000020_eligibility_rls.sql
+src/
+  app/(dashboard)/eligibility/         list, new, [id]
+  app/api/eligibility/                 3 route handlers
+  components/eligibility/               table, filters, check form
+  lib/services/eligibility-service.ts
+  lib/services/eligibility-coverage.ts  pure, DB-free status logic
+  lib/validations/eligibility.ts
+tests/
+  validations/eligibility.test.ts
+  services/eligibility-coverage.test.ts
+```
+
+## 13. Future Improvements
+
+- **Real clearinghouse/payer integration**: submit an X12 270 (or call a
+  clearinghouse API like Availity/Change Healthcare) and parse the 271
+  response for deductible, coinsurance, out-of-pocket-max, and
+  service-type-specific coverage - none of which this module fabricates,
+  since it only has on-file data to work with.
+- **Batch/pre-visit checks**: run eligibility automatically for tomorrow's
+  scheduled appointments overnight rather than only on-demand, surfacing
+  problems (expired coverage, no policy on file) before the patient
+  arrives.
+- **Policy picker in the check form**: like Claims' equivalent future
+  improvement, the create form doesn't yet expose a per-patient policy
+  picker when a patient has multiple policies on file - it always
+  resolves to the primary. A dependent policy dropdown is a natural
+  follow-up.
+
+---
+
 ## Local development
 
 ```bash

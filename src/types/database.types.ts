@@ -49,6 +49,14 @@ export type ClaimStatus =
   | "paid"
   | "appealed"
   | "closed";
+export type EligibilityServiceType =
+  | "general"
+  | "specialist"
+  | "behavioral_health"
+  | "urgent_care"
+  | "telehealth"
+  | "other";
+export type EligibilityStatus = "active" | "inactive" | "error";
 
 export interface Database {
   public: {
@@ -992,6 +1000,55 @@ export interface Database {
           to_status: string;
         };
         Update: Partial<Database["public"]["Tables"]["claim_status_history"]["Row"]>;
+      };
+      eligibility_checks: {
+        Row: {
+          id: string;
+          organization_id: string;
+          patient_id: string;
+          patient_insurance_policy_id: string | null;
+          provider_id: string | null;
+          service_type: EligibilityServiceType;
+          status: EligibilityStatus;
+          payer_name: string | null;
+          plan_name: string | null;
+          policy_number: string | null;
+          copay_amount: number | null;
+          effective_date: string | null;
+          termination_date: string | null;
+          notes: string | null;
+          checked_by: string | null;
+          checked_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "eligibility_checks_patient_id_fkey";
+            columns: ["patient_id"];
+            isOneToOne: false;
+            referencedRelation: "patients";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "eligibility_checks_provider_id_fkey";
+            columns: ["provider_id"];
+            isOneToOne: false;
+            referencedRelation: "providers";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "eligibility_checks_patient_insurance_policy_id_fkey";
+            columns: ["patient_insurance_policy_id"];
+            isOneToOne: false;
+            referencedRelation: "patient_insurance_policies";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["eligibility_checks"]["Row"]> & {
+          organization_id: string;
+          patient_id: string;
+          status: EligibilityStatus;
+        };
+        Update: Partial<Database["public"]["Tables"]["eligibility_checks"]["Row"]>;
       };
     };
     Views: Record<string, never>;
