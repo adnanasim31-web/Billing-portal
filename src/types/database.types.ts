@@ -69,6 +69,16 @@ export type DenialCategory =
   | "documentation"
   | "other";
 export type DenialResolutionStatus = "open" | "in_progress" | "appealed" | "resolved" | "written_off";
+export type CredentialType =
+  | "npi"
+  | "state_license"
+  | "dea"
+  | "malpractice_insurance"
+  | "board_certification"
+  | "caqh"
+  | "w9"
+  | "other";
+export type CredentialStatus = "active" | "expired" | "pending_renewal" | "revoked";
 
 export interface Database {
   public: {
@@ -1201,6 +1211,39 @@ export interface Database {
           body: string;
         };
         Update: Partial<Database["public"]["Tables"]["ar_notes"]["Row"]>;
+      };
+      provider_credentials: {
+        Row: {
+          id: string;
+          organization_id: string;
+          provider_id: string;
+          credential_type: CredentialType;
+          credential_number: string | null;
+          issuing_authority: string | null;
+          issue_date: string | null;
+          expiration_date: string | null;
+          status: CredentialStatus;
+          notes: string | null;
+          created_by: string | null;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "provider_credentials_provider_id_fkey";
+            columns: ["provider_id"];
+            isOneToOne: false;
+            referencedRelation: "providers";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["provider_credentials"]["Row"]> & {
+          organization_id: string;
+          provider_id: string;
+          credential_type: CredentialType;
+        };
+        Update: Partial<Database["public"]["Tables"]["provider_credentials"]["Row"]>;
       };
     };
     Views: Record<string, never>;

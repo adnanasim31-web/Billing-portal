@@ -1869,6 +1869,321 @@ tests/
 
 ---
 
+# Module 12: Reports
+
+A read-only lens over data every prior billing module already maintains -
+no new tables, just aggregation and CSV export.
+
+## 1. UI Design
+
+- **Reports** (`/reports`): a from/to date-range picker above four
+  sections - Collections Summary, Claims by Status, Provider Production,
+  and Denials by Category (with an overall denial rate) - each with its
+  own "Export CSV" button. Defaults to the trailing 90 days if no range
+  is set.
+
+## 2. Database Tables
+
+None. This module reads `claims` (filtered by `service_date_from` within
+the selected range) and `claim_denials` (filtered by `created_at` within
+the range) - both already exist. `reports.view` was already seeded in
+Module 1's permission catalog (and granted to Biller, Admin, Auditor via
+its `%.view` wildcard, and Read Only) - no RBAC migration needed. There is
+no `reports.manage`; reports are inherently read-only/export-only, which
+the permission catalog already reflected from the start.
+
+## 3. Models
+
+No new types beyond the aggregation shapes in `report-aggregation.ts`
+(not persisted, so they live as plain TypeScript interfaces, not
+`database.types.ts` entries).
+
+## 4. Controllers (Route Handlers)
+
+`src/app/api/reports/**` - 2 endpoints (JSON summary, CSV export).
+
+## 5. Services
+
+- `report-aggregation.ts` - **pure, DB-free** functions, the same split
+  used by every prior module's business logic
+  (`claim-scrubbing`/`eligibility-coverage`/`payment-reconciliation`/
+  `ar-aging`): `summarizeClaimsByStatus()`, `summarizeCollections()`
+  (charge/paid/adjustment/balance totals plus a collection-rate
+  percentage), `summarizeProviderProduction()` (grouped and sorted by
+  charge volume), `summarizeDenialCategories()`, `calculateDenialRate()`,
+  and `toCsv()` (a small, dependency-free CSV serializer with proper
+  quote/comma escaping).
+- `report-service.ts` - fetches claims in the date range (joined to
+  `providers` for names) and denials in the date range, then hands both
+  to the aggregation functions above.
+
+## 6. APIs
+
+| Method | URL                    | Purpose                                                       |
+|--------|--------------------------|--------------------------------------------------------------------|
+| GET    | `/api/reports/summary`   | All four aggregations for a date range (`reports.view`)             |
+| GET    | `/api/reports/export`    | CSV download for one section (`?type=status\|collections\|providers\|denials`) |
+
+## 7. Validation
+
+`src/lib/validations/reports.ts` - `reportDateRangeSchema` (optional
+YYYY-MM-DD `from`/`to`), `reportExportSchema` (adds the export `type`
+enum).
+
+## 8. Frontend Pages
+
+- `src/app/(dashboard)/reports/page.tsx` - the only page; calls
+  `getReportsSummary()` directly rather than fetching its own API route,
+  consistent with every other server-rendered page in this app.
+
+## 9. Components
+
+- `src/components/reports/*` - `ReportDateRangeFilter`,
+  `ClaimsStatusSection`, `CollectionsSection`, `ProviderProductionSection`,
+  `DenialCategorySection`.
+
+## 10. Business Logic
+
+- **The service/aggregation split, once more**: exactly the same
+  reasoning as Modules 7/8/9/11 - fetching is I/O, bucketing/summing is
+  logic, and keeping them in separate files means the logic can be unit
+  tested without touching Supabase at all.
+- **Two different date dimensions, on purpose**: claims are windowed by
+  `service_date_from` (a report titled "March collections" should mean
+  visits that happened in March, not claims merely touched that month),
+  while denials are windowed by `claim_denials.created_at` (when the
+  denial was *opened*, matching Module 10's own worklist framing) -
+  documented explicitly rather than silently picking one and hoping it
+  reads naturally for both.
+- **CSV export reuses the exact same aggregation the page renders**:
+  `/api/reports/export` calls `getReportsSummary()` and formats the same
+  summary object the UI displays, so the downloaded file can never drift
+  from what's on screen.
+
+## 11. Testing
+
+- `tests/services/report-aggregation.test.ts` - every aggregation
+  function (grouping, sorting, zero-division guards) and `toCsv()`
+  (header/row formatting, comma/quote escaping).
+
+## 12. Folder Structure
+
+```
+src/
+  app/(dashboard)/reports/page.tsx
+  app/api/reports/                      2 route handlers
+  components/reports/                    date filter, 4 summary sections
+  lib/services/report-service.ts
+  lib/services/report-aggregation.ts     pure, DB-free aggregation + CSV
+  lib/validations/reports.ts
+tests/
+  services/report-aggregation.test.ts
+```
+
+## 13. Future Improvements
+
+- **No pagination/cap on the underlying fetch**: like Module 11's aging
+  summary, `fetchClaimsInRange()` pulls every matching claim with no
+  limit - fine at demo scale, but a very large org over a wide date range
+  would want a database-side aggregate query instead of summing in JS.
+- **No saved/scheduled reports**: every report is computed on-demand for
+  whatever range is in the URL; a real system would let a biller save a
+  report configuration or schedule a recurring email export.
+- **No chart visualizations**: everything renders as tables and summary
+  numbers - trend charts (collections over time, denial rate over time)
+  would need either a charting library or hand-rolled SVG, deliberately
+  out of scope here.
+- **Combined multi-sheet export**: each CSV export is one section at a
+  time; a single workbook-style export covering all four sections isn't
+  implemented.
+
+---
+
+# Module 13: Credentialing
+
+Fills in the "Credentialing" tab left as a placeholder on the provider
+profile since Module 3, plus an organization-wide worklist for tracking
+which providers have expiring licenses, DEA registrations, or malpractice
+coverage.
+
+## 1. UI Design
+
+- **Provider profile "Credentialing" tab**: replaces the
+  `UpcomingModulePlaceholder` with a real list of that provider's
+  credentialing records - type, number, issuing authority, expiration
+  date, a manually-set status badge, and a computed "Expiring soon"/
+  "Expired" badge layered on top. Add/edit via one shared dialog; delete
+  inline. Hidden entirely (not just disabled) for viewers without
+  `credentialing.view` - the tab trigger itself doesn't render.
+- **Credentialing worklist** (`/credentialing`): every credentialing
+  record across every provider in the org, filterable by status and by
+  "expiring in 60 days" - the compliance-officer view, as opposed to the
+  provider profile's per-provider view. Rows link to the provider's
+  profile rather than a separate detail page.
+
+## 2. Database Tables
+
+`supabase/migrations/00000000000027` and `00000000000028`:
+
+- `provider_credentials` - one row per credentialing item (NPI, state
+  license, DEA registration, malpractice insurance, board certification,
+  CAQH, W9, other), with an optional issue/expiration window, a
+  manually-set `status` (`active`/`expired`/`pending_renewal`/`revoked`),
+  and free-text notes.
+
+RLS reuses the `credentialing.view`/`credentialing.manage` permissions
+already seeded in Module 1's catalog. Notably, `credentialing.manage` is
+**not** granted to Biller in the seed - only Admin/Owner (via their
+broad grants) can add or edit records, while Provider (their own status)
+and Auditor (via the `%.view` wildcard) can view - a real-world scope
+choice (credentialing is typically an administrative/compliance
+function, not a billing one) that required no changes, since Module 1's
+catalog already reflected it.
+
+### Relationships
+
+```
+providers 1---N provider_credentials
+```
+
+## 3. Models
+
+`src/types/database.types.ts` extended with `provider_credentials` and
+two new union types: `CredentialType` (`npi | state_license | dea |
+malpractice_insurance | board_certification | caqh | w9 | other`) and
+`CredentialStatus` (`active | expired | pending_renewal | revoked`).
+
+## 4. Controllers (Route Handlers)
+
+`src/app/api/credentialing/route.ts` (org-wide list) plus
+`src/app/api/providers/[id]/credentials/**` (2 route files, 4 handlers:
+list/create, update/delete) - nested under `/api/providers` since a
+credential always belongs to exactly one provider, but gated by
+`credentialing.*` permissions rather than `providers.*`, since
+credentialing is its own permission domain.
+
+## 5. Services
+
+- `credentialing-status.ts` - **pure, DB-free** `isExpired()`/
+  `isExpiringSoon()` (default 60-day warning window), the same pattern
+  as every prior module's business logic. This is a computed alert layer
+  independent of the record's manually-set `status` field: a credential
+  a biller marked "active" can still be flagged "Expiring soon" the
+  moment its `expiration_date` falls inside the window - the two
+  indicators are shown side by side rather than one replacing the other.
+- `credentialing-service.ts` - org-wide and per-provider listing, plus
+  create/update/delete. Unlike most of Modules 7-12's audit-trail-style
+  tables, credentials support real edits and hard deletes - a
+  credentialing record is corrected or superseded in place, not
+  versioned.
+
+## 6. APIs
+
+| Method | URL                                          | Purpose                                            |
+|--------|------------------------------------------------|--------------------------------------------------------|
+| GET    | `/api/credentialing`                            | Org-wide worklist (status/expiring-soon filters, `credentialing.view`) |
+| GET    | `/api/providers/:id/credentials`                | List one provider's credentials (`credentialing.view`)  |
+| POST   | `/api/providers/:id/credentials`                | Add a credential (`credentialing.manage`)               |
+| PATCH  | `/api/providers/:id/credentials/:credentialId`  | Edit a credential (`credentialing.manage`)              |
+| DELETE | `/api/providers/:id/credentials/:credentialId`  | Remove a credential (`credentialing.manage`)            |
+
+## 7. Validation
+
+`src/lib/validations/credentialing.ts` - `credentialSchema` (type enum,
+optional number/authority/dates, status defaulting to `active`),
+`credentialSearchSchema` (status filter defaulting to `all`, an
+`expiringSoon` string-to-boolean transform for the `?expiringSoon=true`
+query param).
+
+## 8. Frontend Pages
+
+- `src/app/(dashboard)/credentialing/page.tsx` - the only new page.
+- `src/app/(dashboard)/providers/[id]/page.tsx` - updated to fetch and
+  pass credentials (only when the viewer has `credentialing.view`).
+
+## 9. Components
+
+- `src/components/credentialing/*` - `CredentialingTable`,
+  `CredentialingFilters`.
+- `src/components/providers/provider-credentialing-tab.tsx` - replaces
+  the Module 3 placeholder.
+- `src/components/providers/provider-tabs.tsx` - the Credentialing tab
+  trigger/content now only renders when credentials data was fetched
+  (i.e. the viewer has `credentialing.view`).
+
+## 10. Business Logic
+
+- **Computed alerts layered over manual status, not replacing it**: a
+  credentialing coordinator's manually-chosen `status` (e.g., marking
+  something "pending_renewal" while paperwork is in flight) and the
+  system's own date-driven "Expired"/"Expiring soon" badges are
+  deliberately independent - the manual status captures workflow state
+  the dates alone can't ("we know, we're handling it"), while the
+  computed badge ensures an expiring credential is never silently missed
+  just because nobody updated its status field yet.
+- **Real deletes, unlike most of the RCM modules built so far**: Claims/
+  Payments/Denials/AR/Eligibility all treat their core records as an
+  append-only audit trail by design (financial and compliance history
+  shouldn't be rewritten). Credentialing records are different - a
+  duplicate entry or a typo in a license number should just be fixed or
+  removed, so this module allows real updates and hard deletes.
+- **Permission-gated tab visibility, not just disabled fields**: most
+  earlier modules disable a form for view-only roles (e.g. Denials'
+  `<fieldset disabled>`). Here, a provider profile viewer without
+  `credentialing.view` never even sees the Credentialing tab trigger -
+  the data is never fetched for them at all, since credentialing status
+  can be more sensitive than most other per-provider information.
+
+## 11. Testing
+
+- `tests/services/credentialing-status.test.ts` - expiration boundary
+  cases (exact day, day after, custom warning windows).
+- `tests/validations/credentialing.test.ts` - type/date/status
+  validation and the `expiringSoon` string-to-boolean transform.
+
+## 12. Folder Structure
+
+```
+supabase/migrations/
+  00000000000027_credentialing_schema.sql
+  00000000000028_credentialing_rls.sql
+src/
+  app/(dashboard)/credentialing/page.tsx
+  app/api/credentialing/route.ts
+  app/api/providers/[id]/credentials/            2 route files, 4 handlers
+  components/credentialing/                       table, filters
+  components/providers/provider-credentialing-tab.tsx
+  lib/services/credentialing-service.ts
+  lib/services/credentialing-status.ts            pure, DB-free expiry logic
+  lib/validations/credentialing.ts
+tests/
+  services/credentialing-status.test.ts
+  validations/credentialing.test.ts
+```
+
+## 13. Future Improvements
+
+- **No document attachments**: a real credentialing record needs the
+  actual license/certificate file attached (mirroring Module 2's
+  `patient_documents` Storage pattern) - this module tracks structured
+  metadata only, deliberately deferring file upload to a future
+  dedicated Documents module.
+- **No renewal reminders/notifications**: "Expiring soon" is a badge you
+  have to go looking for (the worklist or the provider tab) - there's no
+  email/in-app notification when a credential crosses into its warning
+  window.
+- **CAQH/PECOS/NPI registry verification**: the permission catalog's own
+  description ("View CAQH/PECOS/NPI/DEA/license status") implies live
+  verification against those external registries; this module only
+  stores whatever a human enters, with no automated lookup or
+  verification against any external source.
+- **No credentialing workflow/checklist**: real payer credentialing is a
+  multi-step process (application, primary source verification,
+  committee approval) tracked over weeks; `pending_renewal` is the only
+  in-progress status offered here, not a full workflow state machine.
+
+---
+
 ## Local development
 
 ```bash

@@ -1,10 +1,11 @@
 "use client";
 
-import { BadgeCheck, LineChart } from "lucide-react";
+import { LineChart } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProviderOverviewTab } from "@/components/providers/provider-overview-tab";
 import { ScheduleTab, type ScheduleBlockRow } from "@/components/providers/schedule-tab";
 import { ProviderClaimsTab, type ProviderClaimRow } from "@/components/providers/provider-claims-tab";
+import { ProviderCredentialingTab, type ProviderCredentialRow } from "@/components/providers/provider-credentialing-tab";
 import { UpcomingModulePlaceholder } from "@/components/shared/upcoming-module-placeholder";
 
 interface ProviderTabsProps {
@@ -21,9 +22,18 @@ interface ProviderTabsProps {
   };
   schedule: ScheduleBlockRow[];
   claims: ProviderClaimRow[];
+  credentials: ProviderCredentialRow[] | null;
+  canManageCredentialing: boolean;
 }
 
-export function ProviderTabs({ providerId, overview, schedule, claims }: ProviderTabsProps) {
+export function ProviderTabs({
+  providerId,
+  overview,
+  schedule,
+  claims,
+  credentials,
+  canManageCredentialing,
+}: ProviderTabsProps) {
   return (
     <Tabs defaultValue="overview">
       <TabsList className="flex-wrap">
@@ -31,7 +41,7 @@ export function ProviderTabs({ providerId, overview, schedule, claims }: Provide
         <TabsTrigger value="schedule">Schedule ({schedule.length})</TabsTrigger>
         <TabsTrigger value="claims">Claims ({claims.length})</TabsTrigger>
         <TabsTrigger value="performance">Performance &amp; Revenue</TabsTrigger>
-        <TabsTrigger value="credentialing">Credentialing</TabsTrigger>
+        {credentials && <TabsTrigger value="credentialing">Credentialing ({credentials.length})</TabsTrigger>}
       </TabsList>
 
       <TabsContent value="overview">
@@ -50,13 +60,15 @@ export function ProviderTabs({ providerId, overview, schedule, claims }: Provide
           moduleName="Reports"
         />
       </TabsContent>
-      <TabsContent value="credentialing">
-        <UpcomingModulePlaceholder
-          icon={BadgeCheck}
-          title="No credentialing records yet"
-          moduleName="Credentialing"
-        />
-      </TabsContent>
+      {credentials && (
+        <TabsContent value="credentialing">
+          <ProviderCredentialingTab
+            providerId={providerId}
+            credentials={credentials}
+            canManage={canManageCredentialing}
+          />
+        </TabsContent>
+      )}
     </Tabs>
   );
 }

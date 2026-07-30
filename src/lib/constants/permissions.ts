@@ -31,6 +31,9 @@ export const PERMISSIONS = {
   DENIALS_MANAGE: "denials.manage",
   AR_VIEW: "ar.view",
   AR_MANAGE: "ar.manage",
+  REPORTS_VIEW: "reports.view",
+  CREDENTIALING_VIEW: "credentialing.view",
+  CREDENTIALING_MANAGE: "credentialing.manage",
 } as const;
 
 export type PermissionSlug = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

@@ -4,6 +4,7 @@ import { getCurrentUser, hasPermission } from "@/lib/services/current-user-servi
 import { getProviderById } from "@/lib/services/provider-service";
 import { listProviderSchedule } from "@/lib/services/provider-schedule-service";
 import { listClaimsForProvider } from "@/lib/services/claim-service";
+import { listCredentialsForProvider } from "@/lib/services/credentialing-service";
 import { PERMISSIONS } from "@/lib/constants/permissions";
 import { ProviderHeader } from "@/components/providers/provider-header";
 import { ProviderTabs } from "@/components/providers/provider-tabs";
@@ -19,9 +20,11 @@ export default async function ProviderProfilePage({ params }: { params: Promise<
   const provider = await getProviderById(id, user.organizationId);
   if (!provider) notFound();
 
-  const [schedule, claims] = await Promise.all([
+  const canViewCredentialing = hasPermission(user, PERMISSIONS.CREDENTIALING_VIEW);
+  const [schedule, claims, credentials] = await Promise.all([
     listProviderSchedule(id, user.organizationId),
     listClaimsForProvider(id, user.organizationId),
+    canViewCredentialing ? listCredentialsForProvider(id, user.organizationId) : Promise.resolve(null),
   ]);
 
   const displayName =
@@ -67,6 +70,21 @@ export default async function ProviderProfilePage({ params }: { params: Promise<
           totalChargeAmount: Number(c.total_charge_amount),
           status: c.status,
         }))}
+        credentials={
+          credentials
+            ? credentials.map((c) => ({
+                id: c.id,
+                credentialType: c.credential_type,
+                credentialNumber: c.credential_number,
+                issuingAuthority: c.issuing_authority,
+                issueDate: c.issue_date,
+                expirationDate: c.expiration_date,
+                status: c.status,
+                notes: c.notes,
+              }))
+            : null
+        }
+        canManageCredentialing={hasPermission(user, PERMISSIONS.CREDENTIALING_MANAGE)}
       />
     </div>
   );
