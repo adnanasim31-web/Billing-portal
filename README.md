@@ -2617,6 +2617,265 @@ tests/
 
 ---
 
+# Module 17: CRM
+
+A lightweight sales pipeline for the billing company's **own** business
+development - tracking prospective and existing client relationships
+(practices considering or already using this organization's billing
+services). Not to be confused with the patients this organization bills
+on behalf of its provider clients - a completely separate concept that
+happens to share the word "client."
+
+## 1. UI Design
+
+- **CRM** (`/crm`): a filterable lead list (by stage/search), an "Add
+  lead" flow, and a lead detail page showing contact info plus an
+  activity log (calls/emails/meetings/notes) with a form to log new
+  activity.
+
+## 2. Database Tables
+
+`supabase/migrations/00000000000034` and `00000000000035`:
+
+- `crm_leads` - one row per pipeline entry: contact/company info, `stage`
+  (`lead → qualified → proposal → contract_sent → client`, or `lost`),
+  estimated value, source, and an assigned owner.
+- `crm_activities` - an append-only interaction log per lead (call/email/
+  meeting/note), the same "activity feed" shape used elsewhere in this
+  app (Denials' resolution notes, AR's collection notes).
+
+RLS reuses the `crm.view`/`crm.manage` permissions already seeded in
+Module 1's catalog. Neither is granted to Biller/Front Desk/Provider in
+the original seed - only Admin/Owner (via their broad grants) can see or
+manage the pipeline, which tracks: sales/business-development is a
+practice-ownership concern, not a billing-staff one.
+
+### Relationships
+
+```
+crm_leads 1---N crm_activities
+crm_leads N---1 profiles (owner_id)
+```
+
+## 3. Models
+
+`src/types/database.types.ts` extended with `crm_leads`/`crm_activities`
+and three new union types: `CrmLeadStage`, `CrmLeadSource`, and
+`CrmActivityType`.
+
+## 4. Controllers (Route Handlers)
+
+`src/app/api/crm/leads/**` - 3 route files, 6 handlers (list/create,
+get/update a lead, list/add activities).
+
+## 5. Services
+
+- `crm-service.ts` - lead CRUD plus `listActivitiesForLead()`/
+  `addActivity()`. `updateLead()` writes a `crm.lead_stage_changed` audit
+  log entry specifically when the stage differs from before, separate
+  from the general `crm.lead_updated`-style logging every other field
+  edit gets folded into a plain `crm.lead_created`/no-op.
+
+## 6. APIs
+
+| Method | URL                                | Purpose                                    |
+|--------|---------------------------------------|-------------------------------------------------|
+| GET    | `/api/crm/leads`                      | List leads (query/stage filters, `crm.view`)     |
+| POST   | `/api/crm/leads`                      | Create a lead (`crm.manage`)                     |
+| GET    | `/api/crm/leads/:id`                  | Get one lead                                     |
+| PATCH  | `/api/crm/leads/:id`                  | Update a lead, including stage (`crm.manage`)    |
+| GET    | `/api/crm/leads/:id/activities`       | List a lead's activity log                       |
+| POST   | `/api/crm/leads/:id/activities`       | Log an activity (`crm.manage`)                   |
+
+## 7. Validation
+
+`src/lib/validations/crm.ts` - `crmLeadSchema` (stage/source enums
+defaulting to `lead`/`other`, optional email validated as an email,
+non-negative estimated value), `crmActivitySchema`, `crmSearchSchema`.
+
+## 8. Frontend Pages
+
+- `src/app/(dashboard)/crm/{page,new/page,[id]/page,[id]/edit/page}.tsx`
+
+## 9. Components
+
+- `src/components/crm/*` - `LeadsTable`, `LeadsFilters`, `LeadForm`,
+  `LeadActivitySection`.
+
+## 10. Business Logic
+
+- **A pipeline about the org's own customers, not its patients**: this
+  is the one module in the app where "client" doesn't mean a patient or
+  a provider - it means another practice this organization bills for (or
+  hopes to). Kept completely separate from every clinical/billing table.
+- **Stage changes get their own audit trail entry**: `updateLead()`
+  checks whether `stage` actually changed before logging
+  `crm.lead_stage_changed` with the from/to values - useful for later
+  computing pipeline velocity (time spent in each stage), even though
+  this module doesn't compute that itself yet (see Future Improvements).
+
+## 11. Testing
+
+- `tests/validations/crm.test.ts` - lead/activity/search schema
+  validation, including email format and non-negative value checks.
+
+## 12. Folder Structure
+
+```
+supabase/migrations/
+  00000000000034_crm_schema.sql
+  00000000000035_crm_rls.sql
+src/
+  app/(dashboard)/crm/              list, new, [id], [id]/edit
+  app/api/crm/leads/                 3 route files, 6 handlers
+  components/crm/                    table, filters, form, activity section
+  lib/services/crm-service.ts
+  lib/validations/crm.ts
+tests/
+  validations/crm.test.ts
+```
+
+## 13. Future Improvements
+
+- **No kanban/drag-drop pipeline view**: stages are only changed via the
+  edit form's dropdown; a real sales pipeline UI would let you drag a
+  lead card between stage columns.
+- **No pipeline analytics**: despite logging every stage change with a
+  timestamp, nothing yet computes average time-in-stage, conversion
+  rate, or pipeline value by stage - the raw data for it already exists
+  in `crm_activities`'/audit logs, just not aggregated.
+- **No contract/document attachment**: the permission catalog's own
+  description mentions "contracts," but this module has no link to
+  Module 14's Documents (e.g. attaching a signed services agreement to a
+  lead once it reaches `contract_sent`).
+
+---
+
+# Module 18: Task Management
+
+A general internal task tracker - title, assignee, priority, due date,
+status, and a comment thread. Deliberately generic rather than deeply
+wired into every other module's own workflow.
+
+## 1. UI Design
+
+- **Tasks** (`/tasks`): a filterable list (status/search), a "New task"
+  flow, and a detail page with status-transition buttons and a comment
+  thread.
+
+## 2. Database Tables
+
+`supabase/migrations/00000000000036` and `00000000000037`:
+
+- `tasks` - title, description, `status` (`todo`/`in_progress`/`done`/
+  `canceled`), `priority` (`low`/`medium`/`high`), due date, assignee.
+  `completed_at` is stamped when status reaches `done` and cleared
+  otherwise - the same pattern Module 10's denial resolution timestamp
+  and Module 7's claim `paid_at`-style fields already established.
+- `task_comments` - an append-only comment thread per task.
+
+RLS reuses the `tasks.view`/`tasks.manage` permissions already seeded in
+Module 1's catalog (and already granted to Biller) - no RBAC migration
+needed.
+
+### Relationships
+
+```
+tasks 1---N task_comments
+tasks N---1 profiles (assigned_to)
+```
+
+## 3. Models
+
+`src/types/database.types.ts` extended with `tasks`/`task_comments` and
+two new union types: `TaskStatus`, `TaskPriority`.
+
+## 4. Controllers (Route Handlers)
+
+`src/app/api/tasks/**` - 4 route files, 7 handlers (list/create, get/
+update, status transition, list/add comments).
+
+## 5. Services
+
+- `task-service.ts` - CRUD, `changeTaskStatus()` (stamps/clears
+  `completed_at`), comment listing/posting.
+
+## 6. APIs
+
+| Method | URL                          | Purpose                                    |
+|--------|--------------------------------|-------------------------------------------------|
+| GET    | `/api/tasks`                    | List tasks (query/status/assignee filters, `tasks.view`) |
+| POST   | `/api/tasks`                    | Create a task (`tasks.manage`)                   |
+| GET    | `/api/tasks/:id`                | Get one task                                      |
+| PATCH  | `/api/tasks/:id`                | Edit a task (`tasks.manage`)                      |
+| PATCH  | `/api/tasks/:id/status`         | Transition status (`tasks.manage`)                |
+| GET    | `/api/tasks/:id/comments`       | List a task's comments                            |
+| POST   | `/api/tasks/:id/comments`       | Add a comment (`tasks.manage`)                    |
+
+## 7. Validation
+
+`src/lib/validations/tasks.ts` - `taskSchema`, `taskStatusSchema`,
+`taskCommentSchema`, `taskSearchSchema`.
+
+## 8. Frontend Pages
+
+- `src/app/(dashboard)/tasks/{page,new/page,[id]/page,[id]/edit/page}.tsx`
+
+## 9. Components
+
+- `src/components/tasks/*` - `TasksTable`, `TasksFilters`, `TaskForm`,
+  `TaskStatusActions`, `TaskCommentsSection`.
+
+## 10. Business Logic
+
+- **Status lifecycle mirrors Appointments' UI pattern**: like Module 5's
+  `AppointmentDetailActions`, `TaskStatusActions` only ever shows the
+  valid next actions for a task's current status (`todo` → start/cancel,
+  `in_progress` → done/cancel, `done`/`canceled` → reopen) - the API
+  itself would accept any status value, the guardrail is UX-only,
+  consistent with that module's own documented tradeoff.
+- **Deliberately not integrated with other modules yet**: a task isn't
+  linkable to a specific claim, denial, or CRM lead - it's a standalone
+  general-purpose tracker. See Future Improvements for the obvious next
+  step this enables.
+
+## 11. Testing
+
+- `tests/validations/tasks.test.ts` - task/status/comment/search schema
+  validation.
+
+## 12. Folder Structure
+
+```
+supabase/migrations/
+  00000000000036_tasks_schema.sql
+  00000000000037_tasks_rls.sql
+src/
+  app/(dashboard)/tasks/            list, new, [id], [id]/edit
+  app/api/tasks/                     4 route files, 7 handlers
+  components/tasks/                  table, filters, form, status actions, comments
+  lib/services/task-service.ts
+  lib/validations/tasks.ts
+tests/
+  validations/tasks.test.ts
+```
+
+## 13. Future Improvements
+
+- **No cross-module task linking**: the single biggest gap - a real RCM
+  practice would want to spawn a task directly from a denial ("follow up
+  by Friday"), an overdue AR claim, or an expiring credential, with a
+  link back to that record. Today creating such a task means manually
+  typing the context into the title/description.
+- **No due-date reminders/notifications**: like Module 13's credentialing
+  expirations, an overdue task is only visible if someone looks at
+  `/tasks` - nothing proactively surfaces it.
+- **No recurring tasks or subtasks**: each task is a flat, one-time item.
+- **No bulk actions**: tasks are created/edited/status-changed one at a
+  time; there's no multi-select "mark 5 tasks done" from the list view.
+
+---
+
 ## Local development
 
 ```bash

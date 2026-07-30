@@ -5,9 +5,11 @@ import {
   CalendarClock,
   FileStack,
   Gauge,
+  Handshake,
   LayoutDashboard,
   LibraryBig,
   LineChart,
+  ListChecks,
   MessagesSquare,
   Receipt,
   ReceiptText,
@@ -44,4 +46,6 @@ export const PRIMARY_NAV: NavItem[] = [
   { label: "Documents", href: "/documents", icon: FileStack, enabled: true },
   { label: "Messages", href: "/messages", icon: MessagesSquare, enabled: true },
   { label: "Billing & Plan", href: "/billing", icon: Receipt, enabled: true },
+  { label: "CRM", href: "/crm", icon: Handshake, enabled: true },
+  { label: "Tasks", href: "/tasks", icon: ListChecks, enabled: true },
 ];

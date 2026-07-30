@@ -84,6 +84,11 @@ export type OrgDocumentEntityType = "patient" | "provider" | "claim";
 export type PlanTier = "starter" | "professional" | "enterprise";
 export type BillingCycle = "monthly" | "annual";
 export type SubscriptionStatus = "trialing" | "active" | "past_due" | "canceled";
+export type CrmLeadStage = "lead" | "qualified" | "proposal" | "contract_sent" | "client" | "lost";
+export type CrmLeadSource = "referral" | "website" | "cold_outreach" | "conference" | "other";
+export type CrmActivityType = "call" | "email" | "meeting" | "note";
+export type TaskStatus = "todo" | "in_progress" | "done" | "canceled";
+export type TaskPriority = "low" | "medium" | "high";
 
 export interface Database {
   public: {
@@ -1344,6 +1349,134 @@ export interface Database {
           body: string;
         };
         Update: Partial<Database["public"]["Tables"]["messages"]["Row"]>;
+      };
+      crm_leads: {
+        Row: {
+          id: string;
+          organization_id: string;
+          contact_name: string;
+          company_name: string | null;
+          email: string | null;
+          phone: string | null;
+          stage: CrmLeadStage;
+          estimated_value: number | null;
+          source: CrmLeadSource;
+          owner_id: string | null;
+          notes: string | null;
+          created_by: string | null;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "crm_leads_owner_id_fkey";
+            columns: ["owner_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["crm_leads"]["Row"]> & {
+          organization_id: string;
+          contact_name: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["crm_leads"]["Row"]>;
+      };
+      crm_activities: {
+        Row: {
+          id: string;
+          organization_id: string;
+          lead_id: string;
+          activity_type: CrmActivityType;
+          body: string;
+          author_id: string | null;
+          created_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "crm_activities_lead_id_fkey";
+            columns: ["lead_id"];
+            isOneToOne: false;
+            referencedRelation: "crm_leads";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "crm_activities_author_id_fkey";
+            columns: ["author_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["crm_activities"]["Row"]> & {
+          organization_id: string;
+          lead_id: string;
+          body: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["crm_activities"]["Row"]>;
+      };
+      tasks: {
+        Row: {
+          id: string;
+          organization_id: string;
+          title: string;
+          description: string | null;
+          status: TaskStatus;
+          priority: TaskPriority;
+          due_date: string | null;
+          assigned_to: string | null;
+          created_by: string | null;
+          completed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "tasks_assigned_to_fkey";
+            columns: ["assigned_to"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["tasks"]["Row"]> & {
+          organization_id: string;
+          title: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["tasks"]["Row"]>;
+      };
+      task_comments: {
+        Row: {
+          id: string;
+          organization_id: string;
+          task_id: string;
+          author_id: string | null;
+          body: string;
+          created_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "task_comments_task_id_fkey";
+            columns: ["task_id"];
+            isOneToOne: false;
+            referencedRelation: "tasks";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "task_comments_author_id_fkey";
+            columns: ["author_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["task_comments"]["Row"]> & {
+          organization_id: string;
+          task_id: string;
+          body: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["task_comments"]["Row"]>;
       };
     };
     Views: Record<string, never>;

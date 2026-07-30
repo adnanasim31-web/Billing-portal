@@ -37,6 +37,10 @@ export const PERMISSIONS = {
   MESSAGING_USE: "messaging.use",
   SUBSCRIPTION_VIEW: "subscription.view",
   SUBSCRIPTION_MANAGE: "subscription.manage",
+  CRM_VIEW: "crm.view",
+  CRM_MANAGE: "crm.manage",
+  TASKS_VIEW: "tasks.view",
+  TASKS_MANAGE: "tasks.manage",
 } as const;
 
 export type PermissionSlug = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
