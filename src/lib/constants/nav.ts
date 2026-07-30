@@ -37,7 +37,7 @@ export const PRIMARY_NAV: NavItem[] = [
   { label: "Appointments", href: "/appointments", icon: CalendarClock, enabled: true },
   { label: "Coding Library", href: "/coding", icon: LibraryBig, enabled: true },
   { label: "Providers", href: "/providers", icon: Stethoscope, enabled: true },
-  { label: "Accounts Receivable", href: "/ar", icon: Gauge, enabled: false },
+  { label: "Accounts Receivable", href: "/ar", icon: Gauge, enabled: true },
   { label: "Reports", href: "/reports", icon: LineChart, enabled: false },
   { label: "Documents", href: "/documents", icon: FileStack, enabled: false },
   { label: "Messages", href: "/messages", icon: MessagesSquare, enabled: false },

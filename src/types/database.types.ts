@@ -853,6 +853,7 @@ export interface Database {
           total_charge_amount: number;
           total_paid_amount: number;
           total_adjustment_amount: number;
+          balance_amount: number;
           submitted_at: string | null;
           accepted_at: string | null;
           rejected_at: string | null;
@@ -1168,6 +1169,38 @@ export interface Database {
           claim_status: DenialClaimStatus;
         };
         Update: Partial<Database["public"]["Tables"]["claim_denials"]["Row"]>;
+      };
+      ar_notes: {
+        Row: {
+          id: string;
+          organization_id: string;
+          claim_id: string;
+          author_id: string | null;
+          body: string;
+          created_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ar_notes_claim_id_fkey";
+            columns: ["claim_id"];
+            isOneToOne: false;
+            referencedRelation: "claims";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ar_notes_author_id_fkey";
+            columns: ["author_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["ar_notes"]["Row"]> & {
+          organization_id: string;
+          claim_id: string;
+          body: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["ar_notes"]["Row"]>;
       };
     };
     Views: Record<string, never>;

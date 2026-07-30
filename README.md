@@ -1696,6 +1696,179 @@ tests/
 
 ---
 
+# Module 11: Accounts Receivable
+
+Where Claims, Payments, and Denials all converge: an open-balance work
+queue with an aging report, built almost entirely on data those three
+modules already maintain.
+
+## 1. UI Design
+
+- **AR work queue** (`/ar`): five aging-bucket summary cards (0-30,
+  31-60, 61-90, 91-120, 120+ days, each with a claim count and total
+  balance) above a filterable, paginated list of every claim with an
+  open balance. Filter by claim number or aging bucket.
+- **No separate AR detail page** - each row links straight to the
+  existing claim detail page (Module 7) rather than duplicating claim
+  information in a parallel view.
+- **Claim detail integration**: a new "Collections" card shows the
+  claim's open balance and a running log of follow-up notes ("Called
+  payer, said reprocessing..."), visible to `ar.view` and editable by
+  `ar.manage`, shown only once a claim has actually been billed (not on
+  `draft`/`ready` claims).
+
+## 2. Database Tables
+
+`supabase/migrations/00000000000025` and `00000000000026`:
+
+- **`claims.balance_amount`** (altered onto the existing table, not a
+  new table): a Postgres **generated column**
+  (`total_charge_amount - total_paid_amount - total_adjustment_amount`,
+  `stored`) - lets Postgrest filter/sort/paginate "claims with an open
+  balance" directly at the database level (`.gt("balance_amount", 0)`)
+  instead of fetching every claim and filtering in application code.
+  Indexed (partial, `where balance_amount > 0`) for the work queue query.
+- `ar_notes` - an append-only collections follow-up log per claim,
+  distinct from Module 7's `claim_status_history` (status transitions)
+  and Module 10's `claim_denials` (denial-specific worklist) - this is
+  general collections activity on *any* claim with a balance, whether or
+  not it was ever denied.
+
+RLS on `ar_notes` reuses the `ar.view`/`ar.manage` permissions already
+seeded in Module 1's catalog (and already granted to Biller) - no RBAC
+migration needed.
+
+### Relationships
+
+```
+claims 1---N ar_notes N---1 profiles (author_id)
+```
+
+## 3. Models
+
+`src/types/database.types.ts`: `claims.Row` gained `balance_amount`;
+added the new `ar_notes` table.
+
+## 4. Controllers (Route Handlers)
+
+`src/app/api/ar/**` - 3 endpoints (work queue list, aging summary,
+per-claim collection notes).
+
+## 5. Services
+
+- `ar-aging.ts` - **pure, DB-free** aging logic, same split as
+  `claim-scrubbing.ts`/`eligibility-coverage.ts`/
+  `payment-reconciliation.ts`: `calculateDaysOutstanding()`,
+  `getAgingBucket()`, `getAgingBucketDateRange()` (the key piece - turns
+  a bucket like `31_60` into concrete `submitted_at` date bounds so the
+  service layer can filter at the database level instead of computing
+  ages for every row in JS), and `summarizeAging()` for the dashboard
+  cards.
+- `ar-service.ts` - `listArClaims()` (paginated work queue: `balance_amount
+  > 0`, excludes `draft`/`ready`, optional aging-bucket date-range
+  filter), `getArAgingSummary()` (fetches balance + anchor date for every
+  open-balance claim, hands them to `summarizeAging()`), and
+  `listArNotesForClaim()`/`addArNote()`.
+
+## 6. APIs
+
+| Method | URL                          | Purpose                                              |
+|--------|--------------------------------|---------------------------------------------------------|
+| GET    | `/api/ar`                       | Paginated work queue (query/aging-bucket filters, `ar.view`) |
+| GET    | `/api/ar/summary`               | Aging bucket totals for the dashboard cards (`ar.view`)  |
+| GET    | `/api/ar/:claimId/notes`         | List a claim's collection notes (`ar.view`)              |
+| POST   | `/api/ar/:claimId/notes`         | Add a collection note (`ar.manage`)                      |
+
+## 7. Validation
+
+`src/lib/validations/ar.ts` - `arNoteSchema` (non-empty note body),
+`arSearchSchema` (aging bucket filter defaulting to `all`).
+
+## 8. Frontend Pages
+
+- `src/app/(dashboard)/ar/page.tsx` - the only new page; everything else
+  reuses Module 7's claim detail page.
+
+## 9. Components
+
+- `src/components/ar/*` - `ArAgingSummary`, `ArFilters`, `ArTable`,
+  `ClaimCollectionsSection`.
+- `src/app/(dashboard)/claims/[id]/page.tsx` - gained the Collections
+  card.
+
+## 10. Business Logic
+
+- **The database does the filtering, not application code**: this was
+  the central design decision of the module. Rather than fetching every
+  claim for an org and computing balances/ages in JavaScript (which
+  breaks pagination and gets slower as an org's claim volume grows),
+  `balance_amount` is a stored generated column Postgrest can query
+  directly, and aging-bucket filters are translated to concrete date
+  bounds *before* the query runs, so `.gte()`/`.lte()` on `submitted_at`
+  do the real filtering in Postgres.
+- **The aging anchor is `submitted_at`, not `service_date_from`**: AR
+  aging measures how long a bill has been outstanding *since it was
+  billed*, not since the visit happened - a claim sitting in `draft` for
+  a month before submission shouldn't already look like a 30-day-old
+  receivable the moment it's submitted. (It falls back to
+  `service_date_from` only in the summary computation, defensively, in
+  case `submitted_at` is ever null.)
+- **AR is a lens over existing data, not a new source of truth**: this
+  module introduces exactly one new table (`ar_notes`, pure collections
+  commentary) - the balance and aging figures themselves are entirely
+  derived from what Claims (Module 7) and Payments (Module 9) already
+  maintain, so there's no risk of the AR view drifting out of sync with
+  the claim it's describing.
+
+## 11. Testing
+
+- `tests/services/ar-aging.test.ts` - day-count edge cases (same day,
+  future anchor), bucket boundary values (30/31, 60/61, etc.), that the
+  five bucket date ranges are contiguous and non-overlapping, and the
+  summary aggregation (grouping, summing, empty input).
+- `tests/validations/ar.test.ts` - note body and aging-bucket filter
+  validation.
+
+## 12. Folder Structure
+
+```
+supabase/migrations/
+  00000000000025_ar_balance_column.sql
+  00000000000026_ar_notes_schema.sql
+src/
+  app/(dashboard)/ar/page.tsx
+  app/api/ar/                          3 route handlers
+  components/ar/                        aging summary, filters, table, collections section
+  app/(dashboard)/claims/[id]/page.tsx  updated: Collections card
+  lib/services/ar-service.ts
+  lib/services/ar-aging.ts              pure, DB-free aging logic
+  lib/validations/ar.ts
+tests/
+  services/ar-aging.test.ts
+  validations/ar.test.ts
+```
+
+## 13. Future Improvements
+
+- **Materialized aging summary at scale**: `getArAgingSummary()` fetches
+  every open-balance claim's balance/anchor date with no pagination cap
+  - fine for a single practice's claim volume, but a very large org would
+  want a materialized view or a Postgres aggregate query instead of
+  summing in JavaScript.
+- **Follow-up scheduling on AR itself**: Module 10's denial worklist has
+  `follow_up_date`/`assigned_to`; a general (non-denial) AR claim with an
+  aging balance has no equivalent - collection notes exist, but nothing
+  tracks "who owns this" or "when to check back" the way denials do.
+- **Patient vs. payer balance split**: like Module 9's own noted gap,
+  `balance_amount` doesn't distinguish what's owed by the payer versus
+  the patient (copay/coinsurance/deductible) - a real AR module would
+  age and report on those separately.
+- **Bulk actions from the work queue**: notes are added one claim at a
+  time from its detail page; a supervisor working a list of 50 stale
+  claims has no way to bulk-tag or bulk-assign them from `/ar` itself.
+
+---
+
 ## Local development
 
 ```bash

@@ -5,6 +5,7 @@ import { Pencil, Wallet } from "lucide-react";
 import { getCurrentUser, hasPermission } from "@/lib/services/current-user-service";
 import { getClaimById, scrubClaimById } from "@/lib/services/claim-service";
 import { listPaymentsForClaim } from "@/lib/services/payment-service";
+import { listArNotesForClaim } from "@/lib/services/ar-service";
 import { PERMISSIONS } from "@/lib/constants/permissions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,7 @@ import { ClaimLinesSection } from "@/components/claims/claim-lines-section";
 import { ClaimScrubPanel } from "@/components/claims/claim-scrub-panel";
 import { ClaimStatusHistoryTimeline } from "@/components/claims/claim-status-history";
 import { PAYMENT_METHOD_LABELS } from "@/components/payments/payments-table";
+import { ClaimCollectionsSection } from "@/components/ar/claim-collections-section";
 import type { ClaimStatus } from "@/types/database.types";
 
 export const metadata: Metadata = { title: "Claim" };
@@ -46,10 +48,12 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
   if (!hasPermission(user, PERMISSIONS.CLAIMS_VIEW)) redirect("/dashboard");
 
   const { id } = await params;
-  const [detail, scrubResult, payments] = await Promise.all([
+  const canViewAr = hasPermission(user, PERMISSIONS.AR_VIEW);
+  const [detail, scrubResult, payments, arNotes] = await Promise.all([
     getClaimById(id, user.organizationId),
     scrubClaimById(id, user.organizationId).catch(() => null),
     listPaymentsForClaim(id, user.organizationId),
+    canViewAr ? listArNotesForClaim(id, user.organizationId) : Promise.resolve([]),
   ]);
   if (!detail) notFound();
 
@@ -226,6 +230,20 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
           )}
         </CardContent>
       </Card>
+
+      {canViewAr && !["draft", "ready"].includes(claim.status) && (
+        <ClaimCollectionsSection
+          claimId={claim.id}
+          balanceAmount={Number(claim.balance_amount)}
+          canManage={hasPermission(user, PERMISSIONS.AR_MANAGE)}
+          notes={arNotes.map((n) => ({
+            id: n.id,
+            body: n.body,
+            authorName: n.profiles ? `${n.profiles.first_name} ${n.profiles.last_name}` : "Unknown",
+            createdAt: n.created_at,
+          }))}
+        />
+      )}
 
       <ClaimStatusHistoryTimeline history={historyRows} />
     </div>
