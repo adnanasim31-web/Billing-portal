@@ -82,6 +82,18 @@ export async function listDenials(params: ListDenialsParams) {
   return { denials: data, total: count ?? 0, page, pageSize };
 }
 
+/** Used by the dashboard - denials still open (not resolved or written off). */
+export async function countActiveDenials(organizationId: string): Promise<number> {
+  const admin = createAdminClient();
+  const { count, error } = await admin
+    .from("claim_denials")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", organizationId)
+    .not("resolution_status", "in", `(${RESOLVED_STATUSES.join(",")})`);
+  if (error) throw error;
+  return count ?? 0;
+}
+
 export async function getDenialById(denialId: string, organizationId: string) {
   const admin = createAdminClient();
   const { data, error } = await admin

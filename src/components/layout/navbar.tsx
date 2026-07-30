@@ -5,7 +5,13 @@ import { Bell, Search } from "lucide-react";
 import { PRIMARY_NAV } from "@/lib/constants/nav";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { UserMenu } from "@/components/layout/user-menu";
+import { MobileNav } from "@/components/layout/mobile-nav";
 import type { CurrentUser } from "@/lib/services/current-user-service";
+
+interface OrganizationSummary {
+  name: string;
+  npi: string | null;
+}
 
 function resolveTitle(pathname: string): string {
   if (pathname.startsWith("/settings/profile")) return "My Profile";
@@ -16,13 +22,14 @@ function resolveTitle(pathname: string): string {
   return match?.label ?? "Overview";
 }
 
-export function Navbar({ user }: { user: CurrentUser }) {
+export function Navbar({ user, organization }: { user: CurrentUser; organization: OrganizationSummary | null }) {
   const pathname = usePathname();
   const title = resolveTitle(pathname);
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-4 border-b border-border bg-background/80 px-6 backdrop-blur">
-      <div className="min-w-0">
+    <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-4 border-b border-border bg-background/80 px-4 backdrop-blur sm:px-6">
+      <div className="flex min-w-0 items-center gap-2">
+        <MobileNav organization={organization} />
         <h1 className="truncate text-lg font-semibold tracking-tight">{title}</h1>
       </div>
 
