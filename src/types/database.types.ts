@@ -57,6 +57,7 @@ export type EligibilityServiceType =
   | "telehealth"
   | "other";
 export type EligibilityStatus = "active" | "inactive" | "error";
+export type PaymentMethod = "era" | "check" | "credit_card" | "cash" | "eft" | "other";
 
 export interface Database {
   public: {
@@ -1049,6 +1050,72 @@ export interface Database {
           status: EligibilityStatus;
         };
         Update: Partial<Database["public"]["Tables"]["eligibility_checks"]["Row"]>;
+      };
+      payments: {
+        Row: {
+          id: string;
+          organization_id: string;
+          claim_id: string;
+          payer_name: string;
+          payment_method: PaymentMethod;
+          payment_date: string;
+          reference_number: string | null;
+          total_amount: number;
+          notes: string | null;
+          posted_by: string | null;
+          created_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "payments_claim_id_fkey";
+            columns: ["claim_id"];
+            isOneToOne: false;
+            referencedRelation: "claims";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["payments"]["Row"]> & {
+          organization_id: string;
+          claim_id: string;
+          payer_name: string;
+          payment_date: string;
+          total_amount: number;
+        };
+        Update: Partial<Database["public"]["Tables"]["payments"]["Row"]>;
+      };
+      payment_allocations: {
+        Row: {
+          id: string;
+          payment_id: string;
+          claim_line_id: string;
+          organization_id: string;
+          paid_amount: number;
+          adjustment_amount: number;
+          adjustment_reason: string | null;
+          created_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "payment_allocations_payment_id_fkey";
+            columns: ["payment_id"];
+            isOneToOne: false;
+            referencedRelation: "payments";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "payment_allocations_claim_line_id_fkey";
+            columns: ["claim_line_id"];
+            isOneToOne: false;
+            referencedRelation: "claim_lines";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["payment_allocations"]["Row"]> & {
+          payment_id: string;
+          claim_line_id: string;
+          organization_id: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["payment_allocations"]["Row"]>;
       };
     };
     Views: Record<string, never>;

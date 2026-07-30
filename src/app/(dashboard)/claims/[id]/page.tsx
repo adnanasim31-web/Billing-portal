@@ -1,19 +1,22 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { Pencil } from "lucide-react";
+import { Pencil, Wallet } from "lucide-react";
 import { getCurrentUser, hasPermission } from "@/lib/services/current-user-service";
 import { getClaimById, scrubClaimById } from "@/lib/services/claim-service";
+import { listPaymentsForClaim } from "@/lib/services/payment-service";
 import { PERMISSIONS } from "@/lib/constants/permissions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/shared/empty-state";
 import { CLAIM_STATUS_VARIANT, CLAIM_STATUS_LABELS } from "@/components/claims/claims-table";
 import { ClaimStatusActions } from "@/components/claims/claim-status-actions";
 import { ClaimDiagnosesSection } from "@/components/claims/claim-diagnoses-section";
 import { ClaimLinesSection } from "@/components/claims/claim-lines-section";
 import { ClaimScrubPanel } from "@/components/claims/claim-scrub-panel";
 import { ClaimStatusHistoryTimeline } from "@/components/claims/claim-status-history";
+import { PAYMENT_METHOD_LABELS } from "@/components/payments/payments-table";
 import type { ClaimStatus } from "@/types/database.types";
 
 export const metadata: Metadata = { title: "Claim" };
@@ -43,9 +46,10 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
   if (!hasPermission(user, PERMISSIONS.CLAIMS_VIEW)) redirect("/dashboard");
 
   const { id } = await params;
-  const [detail, scrubResult] = await Promise.all([
+  const [detail, scrubResult, payments] = await Promise.all([
     getClaimById(id, user.organizationId),
     scrubClaimById(id, user.organizationId).catch(() => null),
+    listPaymentsForClaim(id, user.organizationId),
   ]);
   if (!detail) notFound();
 
@@ -78,6 +82,8 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
     diagnosisPointers: l.diagnosis_pointers ?? [],
     units: l.units,
     chargeAmount: Number(l.charge_amount),
+    paidAmount: Number(l.paid_amount),
+    adjustmentAmount: Number(l.adjustment_amount),
   }));
 
   const historyRows = history.map((h) => ({
@@ -185,6 +191,42 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
         diagnosisSequences={diagnosisRows.map((d) => d.sequence)}
         canEdit={canEdit}
       />
+
+      <Card>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <CardTitle className="text-base">Payments</CardTitle>
+          {hasPermission(user, PERMISSIONS.PAYMENTS_POST) && !["draft", "ready"].includes(claim.status) && (
+            <Button size="sm" variant="outline" asChild>
+              <Link href={`/payments/new?claimId=${claim.id}`}>
+                <Wallet className="h-4 w-4" />
+                Post payment
+              </Link>
+            </Button>
+          )}
+        </CardHeader>
+        <CardContent>
+          {payments.length === 0 ? (
+            <EmptyState icon={Wallet} title="No payments posted yet" />
+          ) : (
+            <ul className="divide-y divide-border">
+              {payments.map((p) => (
+                <li key={p.id} className="flex items-center justify-between gap-4 py-2">
+                  <div>
+                    <Link href={`/payments/${p.id}`} className="text-sm font-medium hover:underline">
+                      {p.payer_name}
+                    </Link>
+                    <p className="text-xs text-muted-foreground">
+                      {formatDate(p.payment_date)} · {PAYMENT_METHOD_LABELS[p.payment_method]}
+                    </p>
+                  </div>
+                  <span className="text-sm font-medium">{formatCurrency(Number(p.total_amount))}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
       <ClaimStatusHistoryTimeline history={historyRows} />
     </div>
   );

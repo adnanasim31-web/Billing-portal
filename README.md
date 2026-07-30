@@ -1349,6 +1349,189 @@ tests/
 
 ---
 
+# Module 9: Payment Posting
+
+The natural follow-on to Claims: this module fills in the
+`claim_lines.paid_amount`/`adjustment_amount` and
+`claims.total_paid_amount`/`total_adjustment_amount` columns that Module 7
+scaffolded but never wrote to - turning an accepted claim into a
+reconciled one.
+
+## 1. UI Design
+
+- **Payments list** (`/payments`): every payment posted, filterable by
+  payer/reference-number search and payment method.
+- **Post a payment** (`/payments/new`): pick a claim (search by claim
+  number), payer name, method, date, reference number, and total amount -
+  creates the payment shell. Reachable from the list page and from a
+  "Post payment" shortcut on the claim detail page
+  (`/payments/new?claimId=...`) once a claim has left `draft`/`ready`,
+  with the payer name pre-filled from the claim's payer when known.
+- **Payment detail** (`/payments/[id]`): an "unapplied balance" card (how
+  much of this payment hasn't been allocated to a line yet), the claim's
+  procedure lines with running charge/paid/adjustment/balance figures,
+  an "Allocate to a line" dialog, and a list of what this specific
+  payment has applied so far.
+- **Claim detail integration**: `claim-lines-section.tsx` now shows paid
+  amount and remaining balance under each line's charge once any payment
+  has been applied, and a new "Payments" card lists every payment posted
+  against the claim.
+
+## 2. Database Tables
+
+`supabase/migrations/00000000000021` and `00000000000022`:
+
+- `payments` - one row per payment received against a claim (ERA/EOB
+  batch or a manual entry): payer name, method, date, reference number,
+  and `total_amount` - the cash/credit actually received. Like
+  `eligibility_checks`, this is insert/select only - no update/delete
+  policy - a correction is a new payment or allocation, not an edit to
+  history.
+- `payment_allocations` - how a payment's money (and any accompanying
+  contractual adjustment) applies to one specific `claim_line`. A payment
+  can allocate across multiple lines (one allocation row each); `unique
+  (payment_id, claim_line_id)` means correcting an allocation means
+  posting a new payment rather than editing this one.
+
+RLS reuses the `payments.view`/`payments.post` permissions already
+seeded in Module 1's catalog (and already granted to Biller, with
+`payments.view` also granted to Read Only and Auditor) - no RBAC
+migration needed. `payments.reconcile` is also already seeded and
+granted to Biller, but isn't wired to a distinct action yet in this
+module - see Future Improvements.
+
+### Relationships
+
+```
+claims 1---N payments
+payments 1---N payment_allocations N---1 claim_lines
+```
+
+## 3. Models
+
+`src/types/database.types.ts` extended with `payments`,
+`payment_allocations`, and a new `PaymentMethod` union type (`era |
+check | credit_card | cash | eft | other`).
+
+## 4. Controllers (Route Handlers)
+
+`src/app/api/payments/**` - 4 endpoints (list, create, get one, allocate).
+
+## 5. Services
+
+- `payment-service.ts` - `createPayment()`, listing, `getPaymentById()`
+  (payment + its claim's procedure lines + this payment's allocations +
+  the patient), and `addPaymentAllocation()`: inserts the allocation,
+  **increments** (not overwrites) the target `claim_line`'s
+  `paid_amount`/`adjustment_amount` so multiple payments over time
+  accumulate correctly, calls Module 7's now-exported
+  `recomputeClaimTotals()` to roll the new line totals up to the claim,
+  and auto-transitions the claim to `paid` (via Module 7's
+  `changeClaimStatus()`, writing a status-history entry) once the claim
+  is `accepted`/`appealed` and fully reconciled.
+- `payment-reconciliation.ts` - **pure, DB-free** `isClaimFullyReconciled()`,
+  split out the same way as `claim-scrubbing.ts`/`eligibility-coverage.ts`
+  so the "is this claim paid off" threshold (with a small epsilon for
+  floating-point rounding) is cheap to unit test in isolation.
+
+## 6. APIs
+
+| Method | URL                              | Purpose                                         |
+|--------|-------------------------------------|----------------------------------------------------|
+| GET    | `/api/payments`                     | List payments (query/method filters, `payments.view`) |
+| POST   | `/api/payments`                     | Post a payment shell against a claim (`payments.post`) |
+| GET    | `/api/payments/:id`                 | Get a payment + claim's lines + its allocations       |
+| POST   | `/api/payments/:id/allocations`     | Allocate paid/adjustment amounts to a claim line (`payments.post`) |
+
+## 7. Validation
+
+`src/lib/validations/payments.ts` - `paymentSchema` (positive total
+amount, required payer name/date), `paymentAllocationSchema`
+(non-negative paid/adjustment amounts - zero paid with a positive
+adjustment is valid, e.g. a pure contractual write-off), and
+`paymentSearchSchema` (method filter defaulting to `all`).
+
+## 8. Frontend Pages
+
+- `src/app/(dashboard)/payments/{page,new/page,[id]/page}.tsx` - no edit
+  page; payments are append-only, matching the DB layer.
+
+## 9. Components
+
+- `src/components/payments/*` - `PaymentsTable`, `PaymentsFilters`,
+  `PaymentForm`, `PaymentAllocationSection`.
+- `src/components/claims/claim-lines-section.tsx` - extended to display
+  paid amount and remaining balance per line.
+- `src/app/(dashboard)/claims/[id]/page.tsx` - gained a "Payments" card
+  and a permission/status-gated "Post payment" shortcut.
+
+## 10. Business Logic
+
+- **Accumulate, don't overwrite**: `addPaymentAllocation()` increments a
+  claim line's `paid_amount`/`adjustment_amount` by this allocation's
+  amounts rather than setting them outright - so a partially-paid claim
+  that later receives a second payment (e.g. secondary insurance, then a
+  patient payment) keeps prior postings intact.
+- **Reuse, not duplication, for claim totals**: rather than re-deriving
+  `claims.total_paid_amount`/`total_adjustment_amount` with separate
+  logic, payment posting calls the exact same `recomputeClaimTotals()`
+  Module 7 already uses for line add/remove - one source of truth for
+  "what does this claim's bottom line look like."
+- **Auto-paid is opportunistic, not mandatory**: a claim only
+  auto-transitions to `paid` when it's currently `accepted` or `appealed`
+  and the reconciled total (paid + adjustment) meets or exceeds the
+  charge - a partial payment leaves the claim's status untouched rather
+  than forcing a decision the biller hasn't made yet.
+
+## 11. Testing
+
+- `tests/validations/payments.test.ts` - payment/allocation/search schema
+  validation, including the zero-paid-with-adjustment case.
+- `tests/services/payment-reconciliation.test.ts` - the
+  `isClaimFullyReconciled()` matrix: exact match, overpayment, partial,
+  untouched, and the floating-point rounding tolerance boundary.
+
+## 12. Folder Structure
+
+```
+supabase/migrations/
+  00000000000021_payments_schema.sql
+  00000000000022_payments_rls.sql
+src/
+  app/(dashboard)/payments/            list, new, [id]
+  app/api/payments/                    4 route handlers
+  components/payments/                  table, filters, form, allocation section
+  lib/services/payment-service.ts
+  lib/services/payment-reconciliation.ts  pure, DB-free reconciliation threshold
+  lib/validations/payments.ts
+tests/
+  validations/payments.test.ts
+  services/payment-reconciliation.test.ts
+```
+
+## 13. Future Improvements
+
+- **ERA/835 file ingestion**: `payment_method: 'era'` exists as a label,
+  but there's no actual X12 835 file parser - payments are always
+  entered by hand. A real clearinghouse integration would ingest an 835
+  and auto-create the payment + line-level allocations from its claim
+  adjustment segments (including standard CARC/RARC reason codes, rather
+  than the free-text `adjustment_reason` field here).
+- **`payments.reconcile` isn't wired to anything yet**: the permission
+  exists in the catalog and is granted to Biller, but there's no distinct
+  "reconciliation" workflow (e.g. matching posted payments against bank
+  deposits) - right now `payments.post` covers the entire posting flow.
+- **No void/reversal flow**: correcting a bad allocation today means
+  posting an offsetting payment by hand; a dedicated void action that
+  reverses a specific allocation's effect on `claim_lines` and
+  `claims.total_*` would be safer.
+- **Patient-responsibility tracking**: this module posts payer and
+  patient payments identically against the same claim; a real system
+  would split out patient responsibility (copay/coinsurance/deductible)
+  as its own trackable balance, feeding the eventual AR/Reports modules.
+
+---
+
 ## Local development
 
 ```bash

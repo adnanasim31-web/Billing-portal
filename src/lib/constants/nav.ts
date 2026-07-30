@@ -31,7 +31,7 @@ export const PRIMARY_NAV: NavItem[] = [
   { label: "Patients", href: "/patients", icon: Users, enabled: true },
   { label: "Eligibility", href: "/eligibility", icon: BadgeCheck, enabled: true },
   { label: "Insurance", href: "/insurance", icon: ShieldAlert, enabled: true },
-  { label: "Payments", href: "/payments", icon: Wallet, enabled: false },
+  { label: "Payments", href: "/payments", icon: Wallet, enabled: true },
   { label: "Appointments", href: "/appointments", icon: CalendarClock, enabled: true },
   { label: "Coding Library", href: "/coding", icon: LibraryBig, enabled: true },
   { label: "Providers", href: "/providers", icon: Stethoscope, enabled: true },

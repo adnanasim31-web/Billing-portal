@@ -31,6 +31,8 @@ export interface ClaimLineRow {
   diagnosisPointers: number[];
   units: number;
   chargeAmount: number;
+  paidAmount: number;
+  adjustmentAmount: number;
 }
 
 async function fetchProcedureCodes(query: string): Promise<ComboboxOption[]> {
@@ -228,7 +230,15 @@ export function ClaimLinesSection({
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="text-sm font-medium">{formatCurrency(line.chargeAmount)}</span>
+                  <div className="text-right">
+                    <p className="text-sm font-medium">{formatCurrency(line.chargeAmount)}</p>
+                    {(line.paidAmount > 0 || line.adjustmentAmount > 0) && (
+                      <p className="text-xs text-muted-foreground">
+                        {formatCurrency(line.paidAmount)} paid ·{" "}
+                        {formatCurrency(line.chargeAmount - line.paidAmount - line.adjustmentAmount)} balance
+                      </p>
+                    )}
+                  </div>
                   {canEdit && (
                     <Button variant="ghost" size="sm" onClick={() => handleRemove(line.id)}>
                       <Trash2 className="h-4 w-4" />

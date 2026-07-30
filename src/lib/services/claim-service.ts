@@ -243,7 +243,7 @@ export async function updateClaim(params: {
   return data;
 }
 
-async function recomputeClaimTotals(claimId: string, organizationId: string) {
+export async function recomputeClaimTotals(claimId: string, organizationId: string) {
   const admin = createAdminClient();
   const { data: lines, error } = await admin
     .from("claim_lines")
