@@ -5,8 +5,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { recordAuditLog } from "@/lib/services/audit-service";
 import { recomputeClaimTotals } from "@/lib/services/claim-service";
 
-const PORTAL_PAYER_LABEL = "Patient (self-pay)";
-const PORTAL_PAYMENT_NOTE = "Paid via the patient portal - demo mode, no real payment processor is connected.";
+const PORTAL_PAYER_LABEL = "Patient (self-pay, card)";
+const PORTAL_PAYMENT_NOTE = "Paid via the patient portal by card.";
 
 export interface PortalUser {
   id: string;
@@ -232,14 +232,28 @@ export async function getPortalClaimById(claimId: string, patientId: string, org
   return { claim, lines: lines ?? [], payments: payments ?? [] };
 }
 
-/** Demo-mode self-pay: pays down the claim's lines in order until the amount is exhausted. */
+/**
+ * Called from the Stripe webhook once a card charge has actually succeeded -
+ * pays down the claim's lines in order until the amount is exhausted.
+ * Idempotent on stripePaymentIntentId since Stripe may redeliver the same
+ * webhook event more than once.
+ */
 export async function recordPortalPayment(params: {
   claimId: string;
   patientId: string;
   organizationId: string;
   amount: number;
+  stripePaymentIntentId: string;
 }) {
   const admin = createAdminClient();
+
+  const { data: existing, error: existingError } = await admin
+    .from("payments")
+    .select("*")
+    .eq("stripe_payment_intent_id", params.stripePaymentIntentId)
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (existing) return existing;
 
   const { data: claim, error: claimError } = await admin
     .from("claims")
@@ -249,10 +263,7 @@ export async function recordPortalPayment(params: {
     .eq("organization_id", params.organizationId)
     .maybeSingle();
   if (claimError) throw claimError;
-  if (!claim) throw new Error("Statement not found");
-  if (params.amount > Number(claim.balance_amount)) {
-    throw new Error("That amount is more than the outstanding balance on this statement.");
-  }
+  if (!claim) throw new Error("Claim not found");
 
   const { data: lines, error: linesError } = await admin
     .from("claim_lines")
@@ -267,10 +278,11 @@ export async function recordPortalPayment(params: {
       organization_id: params.organizationId,
       claim_id: params.claimId,
       payer_name: PORTAL_PAYER_LABEL,
-      payment_method: "other",
+      payment_method: "credit_card",
       payment_date: new Date().toISOString().slice(0, 10),
       total_amount: params.amount,
       notes: PORTAL_PAYMENT_NOTE,
+      stripe_payment_intent_id: params.stripePaymentIntentId,
     })
     .select("*")
     .single();
@@ -301,6 +313,17 @@ export async function recordPortalPayment(params: {
     remaining -= allocation;
   }
 
+  if (remaining > 0) {
+    // Shouldn't happen - the API route validates amount <= balance before creating the
+    // PaymentIntent - but the balance could have shifted between then and now. The
+    // card was already charged either way, so log it rather than losing the payment.
+    console.error("[patient-portal] payment amount exceeded allocatable line balance", {
+      claimId: params.claimId,
+      stripePaymentIntentId: params.stripePaymentIntentId,
+      unallocatedAmount: remaining,
+    });
+  }
+
   await recomputeClaimTotals(params.claimId, params.organizationId);
 
   await recordAuditLog({
@@ -309,7 +332,12 @@ export async function recordPortalPayment(params: {
     action: "patient_portal.payment_recorded",
     entityType: "payment",
     entityId: payment.id,
-    metadata: { claimId: params.claimId, patientId: params.patientId, amount: params.amount },
+    metadata: {
+      claimId: params.claimId,
+      patientId: params.patientId,
+      amount: params.amount,
+      stripePaymentIntentId: params.stripePaymentIntentId,
+    },
   });
 
   return payment;

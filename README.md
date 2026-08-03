@@ -3202,6 +3202,86 @@ no new components' logic or data flow.
 
 ---
 
+# Patient Portal: Real Card Payments via Stripe
+
+Replaces the demo self-pay flow (which recorded a payment immediately on
+request, no real money involved) with a real Stripe integration - a patient
+can now actually pay their balance with a credit or debit card.
+
+## Why a webhook, not a direct API call
+
+The "Pay balance" dialog does **not** record a payment as soon as the
+client-side card confirmation succeeds. Client-side success/failure isn't
+trustworthy on its own (the browser tab could close, the network could
+drop the response, or the signal could be spoofed) - a Stripe **webhook**
+(`payment_intent.succeeded`) is the authoritative source of truth that
+money actually moved. `recordPortalPayment()` only ever runs from the
+webhook handler now, never from the client-facing route.
+
+## Flow
+
+1. Patient clicks **Pay balance**, enters an amount (validated against the
+   claim's current balance).
+2. `POST /api/portal/claims/[id]/pay` creates a Stripe PaymentIntent
+   (card only) for that amount, with `claimId`/`patientId`/`organizationId`
+   in its metadata, and returns the `client_secret`.
+3. The dialog renders Stripe's `PaymentElement` and calls
+   `stripe.confirmPayment()` client-side - card data goes straight to
+   Stripe, never through our server (PCI SAQ A scope, not the much larger
+   scope of handling raw card numbers ourselves).
+4. Once Stripe actually captures the charge, it calls
+   `POST /api/webhooks/stripe`, which verifies the signature, then calls
+   `recordPortalPayment()` - the same payment/payment_allocations/
+   `recomputeClaimTotals()` pipeline the old demo flow and Module 9's
+   staff-posted payments both use, so the claim's balance actually drops.
+5. `payments.stripe_payment_intent_id` (new column, migration 40) makes
+   this idempotent - Stripe explicitly documents that the same webhook
+   event can be redelivered, so a duplicate delivery is a no-op rather
+   than a duplicate payment.
+
+## Test mode
+
+The payment dialog shows a "Test mode" banner (with Stripe's `4242 4242
+4242 4242` test card number) whenever `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
+starts with `pk_test_` - purely a client-side prefix check, no separate
+flag needed. Swapping to `pk_live_`/`sk_live_` keys in Vercel is the only
+thing that moves this from test to real charges.
+
+## Configuration required
+
+- `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` - from the
+  Stripe Dashboard.
+- `STRIPE_WEBHOOK_SECRET` - from Dashboard -> Developers -> Webhooks,
+  after adding an endpoint at `/api/webhooks/stripe` subscribed to
+  `payment_intent.succeeded` and `payment_intent.payment_failed`.
+- If any of these are unset, `getStripeClient()` returns `null` and the
+  API route responds with a clear "Card payments aren't enabled yet"
+  message instead of a broken form - same graceful-degradation pattern
+  as the SMTP email integration.
+- **Migration 40 must be run** (`payments.stripe_payment_intent_id`)
+  before this works, since `recordPortalPayment()` now writes to it.
+
+## Testing
+
+No new pure-logic function was introduced - webhook signature
+verification and payment recording are both inherently I/O-bound
+(Stripe's SDK, the database), matching the existing rationale for why
+`sendEmail()`/`recordAuditLog()` aren't unit-tested either. Full
+typecheck/lint/228-test suite/build pass unchanged.
+
+## Future improvements
+
+- **No refund UI**: a refund currently has to be issued from the Stripe
+  Dashboard directly; nothing in this app reverses a `payments` row or
+  re-raises the claim balance yet.
+- **No saved payment methods**: every payment requires re-entering card
+  details; Stripe Customers + saved payment methods would remove that.
+- **No partial-failure recovery UI**: if a webhook delivery fails
+  repeatedly (Stripe retries for ~3 days), there's no in-app view of
+  that - Stripe's own Dashboard is the only visibility into it today.
+
+---
+
 ## Local development
 
 ```bash
