@@ -28,10 +28,23 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   if (!hasPermission(user, PERMISSIONS.CRM_VIEW)) redirect("/dashboard");
 
   const { id } = await params;
-  const [lead, activities] = await Promise.all([
-    getLeadById(id, user.organizationId),
-    listActivitiesForLead(id, user.organizationId),
-  ]);
+
+  let lead: Awaited<ReturnType<typeof getLeadById>>;
+  let activities: Awaited<ReturnType<typeof listActivitiesForLead>>;
+  try {
+    [lead, activities] = await Promise.all([
+      getLeadById(id, user.organizationId),
+      listActivitiesForLead(id, user.organizationId),
+    ]);
+  } catch (err) {
+    const message = err instanceof Error ? `${err.name}: ${err.message}\n${err.stack ?? ""}` : String(err);
+    return (
+      <pre className="whitespace-pre-wrap rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-xs text-destructive">
+        TEMP DEBUG - lead detail load failed:{"\n"}
+        {message}
+      </pre>
+    );
+  }
   if (!lead) notFound();
 
   const canManage = hasPermission(user, PERMISSIONS.CRM_MANAGE);
