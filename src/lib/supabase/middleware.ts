@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "@/types/database.types";
 
-const PUBLIC_ROUTES = [
+const STAFF_PUBLIC_ROUTES = [
   "/login",
   "/register",
   "/forgot-password",
@@ -11,10 +11,21 @@ const PUBLIC_ROUTES = [
   "/accept-invite",
 ];
 
+const PORTAL_PUBLIC_ROUTES = ["/portal/login", "/portal/accept-invite"];
+
 /**
  * Refreshes the Supabase auth session on every request and redirects
  * unauthenticated users away from protected routes / authenticated users
  * away from auth routes. Called from the root middleware.ts.
+ *
+ * Staff and patient-portal accounts share one Supabase Auth session
+ * mechanism but are two different "realms" (profiles vs
+ * patient_portal_accounts) - /portal/* routes are handled separately from
+ * staff routes so a lapsed patient session bounces to /portal/login (not
+ * the staff /login), and a Supabase user from one realm never gets
+ * force-redirected off the other realm's own login page, which would
+ * otherwise loop against that page's own "not the right kind of account"
+ * redirect.
  */
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
@@ -43,7 +54,38 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
-  const isPublicRoute = PUBLIC_ROUTES.some((route) => pathname.startsWith(route));
+
+  if (pathname.startsWith("/portal")) {
+    const isPortalPublicRoute = PORTAL_PUBLIC_ROUTES.some((route) => pathname.startsWith(route));
+
+    if (!user && !isPortalPublicRoute) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/portal/login";
+      return NextResponse.redirect(redirectUrl);
+    }
+
+    if (user && isPortalPublicRoute) {
+      // Only bounce away if this session is actually a patient portal
+      // account - a staff member who wandered onto /portal/login should
+      // just see the page, not get force-redirected in a loop against
+      // /portal's own "not a portal account" check.
+      const { data: portalAccount } = await supabase
+        .from("patient_portal_accounts")
+        .select("id")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (portalAccount) {
+        const redirectUrl = request.nextUrl.clone();
+        redirectUrl.pathname = "/portal";
+        redirectUrl.search = "";
+        return NextResponse.redirect(redirectUrl);
+      }
+    }
+
+    return supabaseResponse;
+  }
+
+  const isPublicRoute = STAFF_PUBLIC_ROUTES.some((route) => pathname.startsWith(route));
   const isAuthRoute =
     isPublicRoute && !pathname.startsWith("/accept-invite") && pathname !== "/reset-password";
 
@@ -55,10 +97,17 @@ export async function updateSession(request: NextRequest) {
   }
 
   if (user && isAuthRoute) {
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/dashboard";
-    redirectUrl.search = "";
-    return NextResponse.redirect(redirectUrl);
+    // Symmetric guard: only bounce to /dashboard if this session actually
+    // has a staff profile - a patient-portal-only user who wandered onto
+    // /login should just see the page, not loop against the dashboard
+    // layout's own "no profile" redirect back to /login.
+    const { data: profile } = await supabase.from("profiles").select("id").eq("id", user.id).maybeSingle();
+    if (profile) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/dashboard";
+      redirectUrl.search = "";
+      return NextResponse.redirect(redirectUrl);
+    }
   }
 
   return supabaseResponse;

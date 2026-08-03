@@ -3282,6 +3282,65 @@ typecheck/lint/228-test suite/build pass unchanged.
 
 ---
 
+# Fix: Middleware Was Never Actually Running
+
+`middleware.ts` had been sitting at the project's outer root
+(`/middleware.ts`) since Module 1. This project uses a `src/` directory for
+everything else (`src/app`, `src/components`, `src/lib`, ...), and Next.js
+requires `middleware.ts` to live at `src/middleware.ts` in that case - at
+the wrong location, Next.js silently never loads it as middleware at all.
+It's been a dead file this entire time.
+
+## Why this looked like "keeps signing out on its own"
+
+`updateSession()` is what refreshes the Supabase session on every request
+and re-issues rotated cookies via `setAll`. `src/lib/supabase/server.ts`'s
+own `createClient()` (used inside Server Components) has the exact same
+`setAll` cookie-writer, but its `try/catch` **silently swallows** the
+write, with a comment stating middleware is expected to be the one
+actually persisting refreshed cookies - cookies can't be written during
+Server Component render, only from Middleware/Route Handlers/Server
+Actions. Since middleware never ran, that assumption was false the whole
+time: nothing was ever refreshing or persisting a rotated session token.
+Supabase access tokens expire roughly hourly, so both the staff dashboard
+and the patient portal - which share this exact mechanism - would
+silently stop being able to authenticate once that token lapsed, reading
+as an unprompted sign-out.
+
+Confirmed with a temporary debug log in `updateSession()`: before the fix,
+it never printed at all, for any request, and no "Compiling /middleware"
+line ever appeared in dev server output - conclusive proof it wasn't
+running. After moving the file, both appeared immediately.
+
+## The second bug this uncovered
+
+With middleware actually running for the first time, its blanket
+"not logged in and not on a public route -> redirect to `/login`" logic
+started applying to `/portal/*` too, since none of those routes were in
+its public-routes list - patients would get redirected to the **staff**
+login page instead of `/portal/login` the moment this shipped alone.
+Fixed by splitting the public-route/redirect logic into two realms in
+the same file: `/portal/*` gets its own public-route list and its own
+"already logged in" check (verifying a `patient_portal_accounts` row
+exists, not just any Supabase user) with `/portal` as the bounce target,
+while staff routes keep `/login`/`/dashboard` and now also verify a
+`profiles` row exists before bouncing a logged-in user away from
+`/login`. Without that verification on both sides, a patient hitting a
+staff route (or vice versa) could loop between middleware's redirect and
+that page's own "wrong account type" redirect.
+
+## Testing
+
+Verified directly via `curl` against a local dev server (not just code
+reading) for both the before and after state: unauthenticated requests to
+`/dashboard`, `/patients`, `/portal`, `/portal/login`, and
+`/portal/accept-invite` all now land on the correct realm's login page
+(or render directly, for the public ones), with `Compiling /middleware`
+now appearing in dev server output. Full typecheck/lint/228-test
+suite/build pass.
+
+---
+
 ## Local development
 
 ```bash
