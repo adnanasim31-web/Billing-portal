@@ -3173,6 +3173,35 @@ lint/228-test suite/build pass.
 
 ---
 
+# Patient Portal: Theme Consistency Pass
+
+The portal's login/accept-invite pages originally had no branding at all -
+just a bare centered card on a flat background - while staff login uses a
+full split-screen dark-green brand panel. The authenticated portal shell's
+header was similarly plain (`bg-background/80`), so the only branded
+surface anywhere in the portal was a small logo mark. Brought both in line
+with the staff app's visual system:
+
+- `src/components/portal/portal-brand-panel.tsx` - the same split-screen
+  layout/gradient/`Kicker` construction as `AuthBrandPanel`, with
+  patient-appropriate highlight copy ("See every statement," "Pay your
+  balance online," "Private & secure") instead of the staff-oriented
+  billing-ops copy. `portal/login` and `portal/accept-invite` now use the
+  same `grid lg:grid-cols-2` split-screen wrapper as `(auth)/layout.tsx`.
+- `PortalHeader` now uses `bg-sidebar`/`text-sidebar-foreground` (the same
+  dark green as the staff sidebar) instead of blending into the page
+  background, so the authenticated portal reads as consistently branded
+  even though it has no left sidebar of its own (there's nothing to
+  navigate to - just the statement list and detail pages).
+
+Verified visually with a headless-browser screenshot comparison against
+the staff login/dashboard before and after, the same technique used to
+diagnose the mobile-nav overlay bug earlier in this project. Full
+typecheck/lint/228-test suite/build pass - this is a styling-only change,
+no new components' logic or data flow.
+
+---
+
 ## Local development
 
 ```bash

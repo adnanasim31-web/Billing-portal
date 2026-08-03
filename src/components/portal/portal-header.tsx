@@ -20,19 +20,25 @@ export function PortalHeader({ patientName }: { patientName: string }) {
   }
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur sm:px-6">
+    <header className="sticky top-0 z-30 flex h-16 items-center justify-between bg-sidebar px-4 text-sidebar-foreground sm:px-6">
       <Link href="/portal" className="flex items-center gap-2.5">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
           M
         </div>
         <div className="leading-tight">
-          <p className="text-sm font-semibold">MedBill Patient Portal</p>
+          <p className="text-sm font-semibold">MedBill</p>
+          <p className="text-[10px] uppercase tracking-wider text-sidebar-muted">Patient Portal</p>
         </div>
       </Link>
 
       <div className="flex items-center gap-3">
-        <span className="hidden text-sm text-muted-foreground sm:inline">{patientName}</span>
-        <Button variant="outline" size="sm" onClick={handleSignOut}>
+        <span className="hidden text-sm text-sidebar-muted sm:inline">{patientName}</span>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleSignOut}
+          className="border-sidebar-border bg-transparent text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-white"
+        >
           <LogOut className="h-4 w-4" />
           Sign out
         </Button>
