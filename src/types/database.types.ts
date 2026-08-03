@@ -89,6 +89,7 @@ export type CrmLeadSource = "referral" | "website" | "cold_outreach" | "conferen
 export type CrmActivityType = "call" | "email" | "meeting" | "note";
 export type TaskStatus = "todo" | "in_progress" | "done" | "canceled";
 export type TaskPriority = "low" | "medium" | "high";
+export type PatientPortalInvitationStatus = "pending" | "accepted" | "expired";
 
 export interface Database {
   public: {
@@ -1477,6 +1478,77 @@ export interface Database {
           body: string;
         };
         Update: Partial<Database["public"]["Tables"]["task_comments"]["Row"]>;
+      };
+      patient_portal_invitations: {
+        Row: {
+          id: string;
+          organization_id: string;
+          patient_id: string;
+          email: string;
+          token_hash: string;
+          status: PatientPortalInvitationStatus;
+          invited_by: string | null;
+          expires_at: string;
+          accepted_at: string | null;
+          created_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "patient_portal_invitations_patient_id_fkey";
+            columns: ["patient_id"];
+            isOneToOne: false;
+            referencedRelation: "patients";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "patient_portal_invitations_invited_by_fkey";
+            columns: ["invited_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["patient_portal_invitations"]["Row"]> & {
+          organization_id: string;
+          patient_id: string;
+          email: string;
+          token_hash: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["patient_portal_invitations"]["Row"]>;
+      };
+      patient_portal_accounts: {
+        Row: {
+          id: string;
+          organization_id: string;
+          patient_id: string;
+          email: string;
+          invited_by: string | null;
+          last_login_at: string | null;
+          created_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "patient_portal_accounts_patient_id_fkey";
+            columns: ["patient_id"];
+            isOneToOne: true;
+            referencedRelation: "patients";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "patient_portal_accounts_invited_by_fkey";
+            columns: ["invited_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["patient_portal_accounts"]["Row"]> & {
+          id: string;
+          organization_id: string;
+          patient_id: string;
+          email: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["patient_portal_accounts"]["Row"]>;
       };
     };
     Views: Record<string, never>;

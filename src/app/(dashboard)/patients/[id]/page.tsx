@@ -8,6 +8,7 @@ import { listPatientHistory } from "@/lib/services/patient-history-service";
 import { listPatientNotes } from "@/lib/services/patient-notes-service";
 import { listAppointmentsForPatient } from "@/lib/services/appointment-service";
 import { listClaimsForPatient } from "@/lib/services/claim-service";
+import { getPortalAccountStatus } from "@/lib/services/patient-portal-service";
 import { PERMISSIONS } from "@/lib/constants/permissions";
 import { PatientHeader } from "@/components/patients/patient-header";
 import { PatientTabs } from "@/components/patients/patient-tabs";
@@ -23,13 +24,14 @@ export default async function PatientProfilePage({ params }: { params: Promise<{
   const patient = await getPatientById(id, user.organizationId);
   if (!patient) notFound();
 
-  const [policies, documents, history, notes, appointments, claims] = await Promise.all([
+  const [policies, documents, history, notes, appointments, claims, portalAccess] = await Promise.all([
     listPatientInsurance(id, user.organizationId),
     listPatientDocuments(id, user.organizationId),
     listPatientHistory(id, user.organizationId),
     listPatientNotes(id, user.organizationId),
     listAppointmentsForPatient(id, user.organizationId),
     listClaimsForPatient(id, user.organizationId),
+    getPortalAccountStatus(id, user.organizationId),
   ]);
 
   const documentsWithUrls = await Promise.all(
@@ -121,6 +123,12 @@ export default async function PatientProfilePage({ params }: { params: Promise<{
           totalChargeAmount: Number(c.total_charge_amount),
           status: c.status,
         }))}
+        portalAccess={{
+          state: portalAccess.state,
+          email: "email" in portalAccess ? portalAccess.email : undefined,
+          lastLoginAt: "last_login_at" in portalAccess ? portalAccess.last_login_at : undefined,
+          expiresAt: "expires_at" in portalAccess ? portalAccess.expires_at : undefined,
+        }}
       />
     </div>
   );
