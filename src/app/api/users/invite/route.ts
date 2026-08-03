@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { inviteUserSchema } from "@/lib/validations/auth";
 import { getCurrentUser, hasPermission } from "@/lib/services/current-user-service";
 import { inviteUser } from "@/lib/services/user-service";
+import { sendEmail } from "@/lib/email";
+import { renderInviteEmail } from "@/lib/email-templates";
 import { PERMISSIONS } from "@/lib/constants/permissions";
 
 export async function POST(request: Request) {
@@ -24,10 +26,18 @@ export async function POST(request: Request) {
     invitedBy: user.id,
   });
 
-  // TODO(Documents/Notifications module): send this via the transactional
-  // email service instead of returning it. Logged for local development.
   const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/accept-invite?token=${rawToken}`;
-  console.info(`[invite] ${parsed.data.email} -> ${inviteUrl}`);
 
-  return NextResponse.json({ ok: true });
+  const emailSent = await sendEmail({
+    to: parsed.data.email,
+    subject: "You've been invited to MedBill RCM Suite",
+    html: renderInviteEmail({
+      heading: "You've been invited",
+      body: "You've been invited to join your organization's MedBill RCM Suite workspace. Click below to set up your account.",
+      actionLabel: "Accept invitation",
+      actionUrl: inviteUrl,
+    }),
+  });
+
+  return NextResponse.json({ ok: true, emailSent, inviteUrl: emailSent ? undefined : inviteUrl });
 }

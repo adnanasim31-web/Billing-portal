@@ -3128,6 +3128,80 @@ tests/validations/patient-portal.test.ts
 
 ---
 
+# Transactional Email: Staff & Patient Portal Invitations
+
+Both invite flows (Team Members and the patient Portal Access tab) previously
+only ever displayed/logged the invite link - no email was ever actually sent,
+which the "Invitation sent" toast dishonestly implied for staff invites.
+`src/lib/email.ts` adds a thin, optional SMTP layer (via `nodemailer`) that
+sends the same invite emails for real when configured, using the `SMTP_*`
+env vars already scaffolded in `.env.example` since Module 1 but never wired
+up until now.
+
+## What changed
+
+- `src/lib/email.ts`: `sendEmail()` - returns `true`/`false` rather than
+  throwing when `SMTP_HOST` isn't set, so callers can gracefully fall back
+  instead of pretending an email went out.
+- `src/lib/email-templates.ts`: `renderInviteEmail()` - one shared minimal
+  HTML layout for both invite emails (heading, body, action button, plain-
+  text link fallback).
+- `POST /api/users/invite` and `POST /api/patients/[id]/portal-invite` both
+  now call `sendEmail()` and return `{ emailSent, inviteUrl? }` -
+  `inviteUrl` is only included when the email wasn't actually sent.
+- `InviteUserDialog` (staff) and `PortalAccessTab` (patient portal) both
+  branch on `emailSent`: a real toast confirmation when it was emailed, or
+  the existing copyable-link dialog when it wasn't. That dialog was
+  extracted into a shared `src/components/shared/invite-link-dialog.tsx`
+  since both flows needed the identical fallback UI.
+
+## Configuration
+
+Set `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASSWORD`/`SMTP_FROM` in
+Vercel's environment variables to enable real sending - works with any SMTP
+provider (Postmark, SendGrid, Mailgun, AWS SES, Gmail SMTP, etc.). Leaving
+`SMTP_HOST` blank keeps the previous copy-the-link behavior - the feature
+degrades gracefully rather than failing.
+
+## Testing
+
+`tests/services/email-templates.test.ts` covers the pure `renderInviteEmail()`
+template function. `sendEmail()` itself isn't unit-tested (it's a thin I/O
+wrapper around `nodemailer`, same rationale as `recordAuditLog()` and other
+DB-calling service functions elsewhere in this project). Full typecheck/
+lint/228-test suite/build pass.
+
+---
+
+# Patient Portal: Theme Consistency Pass
+
+The portal's login/accept-invite pages originally had no branding at all -
+just a bare centered card on a flat background - while staff login uses a
+full split-screen dark-green brand panel. The authenticated portal shell's
+header was similarly plain (`bg-background/80`), so the only branded
+surface anywhere in the portal was a small logo mark. Brought both in line
+with the staff app's visual system:
+
+- `src/components/portal/portal-brand-panel.tsx` - the same split-screen
+  layout/gradient/`Kicker` construction as `AuthBrandPanel`, with
+  patient-appropriate highlight copy ("See every statement," "Pay your
+  balance online," "Private & secure") instead of the staff-oriented
+  billing-ops copy. `portal/login` and `portal/accept-invite` now use the
+  same `grid lg:grid-cols-2` split-screen wrapper as `(auth)/layout.tsx`.
+- `PortalHeader` now uses `bg-sidebar`/`text-sidebar-foreground` (the same
+  dark green as the staff sidebar) instead of blending into the page
+  background, so the authenticated portal reads as consistently branded
+  even though it has no left sidebar of its own (there's nothing to
+  navigate to - just the statement list and detail pages).
+
+Verified visually with a headless-browser screenshot comparison against
+the staff login/dashboard before and after, the same technique used to
+diagnose the mobile-nav overlay bug earlier in this project. Full
+typecheck/lint/228-test suite/build pass - this is a styling-only change,
+no new components' logic or data flow.
+
+---
+
 ## Local development
 
 ```bash
