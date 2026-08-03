@@ -2,19 +2,12 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Mail, ShieldCheck, Copy } from "lucide-react";
+import { Loader2, Mail, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { InviteLinkDialog } from "@/components/shared/invite-link-dialog";
 
 export interface PortalAccessStatus {
   state: "none" | "pending" | "active";
@@ -37,19 +30,17 @@ export function PortalAccessTab({ patientId, status }: { patientId: string; stat
         toast.error(data.error ?? "Unable to send portal invite");
         return;
       }
-      setInviteUrl(data.inviteUrl);
+      if (data.emailSent) {
+        toast.success(`Invite emailed to ${data.email}`);
+      } else {
+        setInviteUrl(data.inviteUrl);
+      }
       router.refresh();
     } catch {
       toast.error("Something went wrong. Please try again.");
     } finally {
       setIsInviting(false);
     }
-  }
-
-  async function handleCopy() {
-    if (!inviteUrl) return;
-    await navigator.clipboard.writeText(inviteUrl);
-    toast.success("Link copied");
   }
 
   return (
@@ -99,23 +90,11 @@ export function PortalAccessTab({ patientId, status }: { patientId: string; stat
         </CardContent>
       </Card>
 
-      <Dialog open={!!inviteUrl} onOpenChange={(open) => !open && setInviteUrl(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Portal invite link</DialogTitle>
-            <DialogDescription>
-              Share this link with the patient - it lets them set a password and activate their portal account.
-              There&apos;s no email service configured, so it isn&apos;t sent automatically.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex items-center gap-2">
-            <Input readOnly value={inviteUrl ?? ""} />
-            <Button type="button" variant="outline" size="icon" onClick={handleCopy}>
-              <Copy className="h-4 w-4" />
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <InviteLinkDialog
+        url={inviteUrl}
+        onOpenChange={(open) => !open && setInviteUrl(null)}
+        description="No email service is configured, so share this link with the patient yourself - it lets them set a password and activate their portal account."
+      />
     </>
   );
 }
