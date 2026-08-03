@@ -9,6 +9,7 @@ import { HistoryTab, type HistoryEntryRow } from "@/components/patients/history-
 import { NotesTab, type PatientNoteRow } from "@/components/patients/notes-tab";
 import { PatientAppointmentsTab, type PatientAppointmentRow } from "@/components/patients/patient-appointments-tab";
 import { PatientClaimsTab, type PatientClaimRow } from "@/components/patients/patient-claims-tab";
+import { PortalAccessTab, type PortalAccessStatus } from "@/components/patients/portal-access-tab";
 import { UpcomingModulePlaceholder } from "@/components/shared/upcoming-module-placeholder";
 
 interface PatientTabsProps {
@@ -32,6 +33,7 @@ interface PatientTabsProps {
   notes: PatientNoteRow[];
   appointments: PatientAppointmentRow[];
   claims: PatientClaimRow[];
+  portalAccess: PortalAccessStatus;
 }
 
 export function PatientTabs({
@@ -43,6 +45,7 @@ export function PatientTabs({
   notes,
   appointments,
   claims,
+  portalAccess,
 }: PatientTabsProps) {
   return (
     <Tabs defaultValue="overview">
@@ -55,6 +58,7 @@ export function PatientTabs({
         <TabsTrigger value="notes">Notes ({notes.length})</TabsTrigger>
         <TabsTrigger value="claims">Claims ({claims.length})</TabsTrigger>
         <TabsTrigger value="balances">Balances</TabsTrigger>
+        <TabsTrigger value="portal">Portal Access</TabsTrigger>
       </TabsList>
 
       <TabsContent value="overview">
@@ -80,6 +84,9 @@ export function PatientTabs({
       </TabsContent>
       <TabsContent value="balances">
         <UpcomingModulePlaceholder icon={Wallet} title="No balance information yet" moduleName="Payment Posting" />
+      </TabsContent>
+      <TabsContent value="portal">
+        <PortalAccessTab patientId={patientId} status={portalAccess} />
       </TabsContent>
     </Tabs>
   );

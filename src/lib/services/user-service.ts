@@ -9,7 +9,7 @@ export async function listOrganizationUsers(organizationId: string) {
   const { data, error } = await admin
     .from("profiles")
     .select(
-      "id, email, first_name, last_name, avatar_url, job_title, status, last_login_at, created_at, user_roles(role_id, roles(name, slug))"
+      "id, email, first_name, last_name, avatar_url, job_title, status, last_login_at, created_at, user_roles!user_roles_user_id_fkey(role_id, roles(name, slug))"
     )
     .eq("organization_id", organizationId)
     .order("created_at", { ascending: false });

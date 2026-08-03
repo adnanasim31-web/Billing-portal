@@ -2951,6 +2951,183 @@ src/lib/services/report-service.ts       + getMonthlyBillingTrend(), getAllTimeC
 
 ---
 
+# Module 19: Patient Portal
+
+An external, non-staff login for patients: view statements/balance and make
+a (demo) self-pay, entirely separate from the profiles/user_roles RBAC
+system staff use. This was the first of the two long-discussed-but-unbuilt
+pieces (Client/Provider/Patient portals, and an AI module) - the AI module
+remains unbuilt, its scope still undefined.
+
+## 1. UI Design
+
+A deliberately lightweight, separate shell - not the staff dashboard's
+sidebar/navbar. `/portal/login` and `/portal/accept-invite` are centered
+cards (no staff-oriented brand panel copy); the authenticated area
+(`/portal` and `/portal/claims/[id]`) gets a minimal sticky header with the
+patient's name and a sign-out button, content capped at `max-w-4xl`.
+
+## 2. Database Tables
+
+1. `patient_portal_invitations` - one-time hashed tokens a staff member
+   generates so a patient can activate their account, mirroring the
+   existing `invitations` table's pattern (`status`: pending/accepted/expired).
+2. `patient_portal_accounts` - links an `auth.users` row 1:1 to an existing
+   `patients` row. This is the patient-facing counterpart to `profiles` for
+   staff, but carries no roles or permissions of its own - a portal account
+   can only ever see the single patient it's linked to.
+
+No changes to any existing table. Self-pay demo payments reuse the
+existing `payments.payment_method = 'other'` value with a clear label in
+`notes`, rather than risking an `ALTER TABLE ... DROP CONSTRAINT` on a
+table this project has never altered before.
+
+## 3. Models
+
+`PatientPortalInvitationStatus` in `database.types.ts`; no new enum needed
+for accounts (they're either linked to a patient or they don't exist).
+
+## 4. Controllers (Route Handlers)
+
+- `POST /api/portal/auth/login`, `/api/portal/auth/logout`,
+  `/api/portal/auth/accept-invite` - patient-facing auth, entirely separate
+  from `/api/auth/*` (staff).
+- `POST /api/portal/claims/[id]/pay` - demo self-pay, gated by
+  `getCurrentPortalUser()` (not staff `hasPermission`).
+- `POST /api/patients/[id]/portal-invite` - staff-side, gated by
+  `patients.manage` (already seeded in Module 1's catalog - no RBAC
+  migration needed).
+
+## 5. Services
+
+`src/lib/services/patient-portal-service.ts`:
+
+- `getCurrentPortalUser()` - the patient-portal counterpart to
+  `getCurrentUser()`. Resolves the Supabase Auth session, then looks up
+  `patient_portal_accounts` (not `profiles`) by that id. A staff member's
+  session returns `null` here (no matching row) exactly as a patient's
+  session returns `null` from `getCurrentUser()` (no `profiles` row) - the
+  two identity systems don't cross-contaminate.
+- `invitePatientToPortal()` / `acceptPatientPortalInvite()` - same
+  hashed-token pattern as staff invitations. Any existing pending
+  invitation for that patient is marked `expired` before a new one is
+  issued, so only one valid link exists at a time.
+- `getPortalOverview()` / `getPortalClaimById()` - both filter by
+  `patient_id` **and** `organization_id`, so a patient can't view another
+  patient's statement by guessing a claim id in the URL.
+- `recordPortalPayment()` - the demo self-pay. Pays down the claim's lines
+  in order (oldest line first) until the amount is exhausted, using the
+  same `payment_allocations` + `recomputeClaimTotals()` pipeline Module 9's
+  staff-posted payments use - so a portal payment actually reduces the
+  displayed balance, not just cosmetically.
+
+## 6. APIs
+
+See Controllers above. All portal API routes reject staff sessions and
+vice versa, since they check different tables for identity.
+
+## 7. Validation
+
+`src/lib/validations/patient-portal.ts`: `patientPortalLoginSchema`,
+`patientPortalAcceptInviteSchema` (reuses the shared `passwordSchema`),
+`patientPortalPaymentSchema` (positive amount, capped).
+
+## 8. Frontend Pages
+
+```
+app/(patient-portal)/portal/
+  login/page.tsx                    public
+  accept-invite/page.tsx            public
+  (authenticated)/
+    layout.tsx                      redirects to /portal/login if unauthenticated
+    page.tsx                        overview: total balance + statement list
+    claims/[id]/page.tsx            statement detail, line items, payment history, pay action
+```
+
+The `(authenticated)` route group only wraps the two authenticated pages,
+so the public login/accept-invite pages don't get the "signed in as X"
+header.
+
+## 9. Components
+
+`src/components/portal/*` - `PortalLoginForm`, `PortalAcceptInviteForm`,
+`PortalHeader`, `PortalClaimsTable`, `PortalPaymentDialog`. On the staff
+side: `src/components/patients/portal-access-tab.tsx`, wired in as a new
+"Portal Access" tab on the patient profile - shows none/pending/active
+status and an invite button.
+
+Unlike the staff invite flow (which only logs the accept-invite link via
+`console.info`, impractical to retrieve from Vercel given how short its
+log retention turned out to be this session), the portal invite endpoint
+returns the link directly so the staff member can copy it from a dialog.
+
+## 10. Business Logic
+
+- **Two non-overlapping identity systems on one Supabase project**: staff
+  auth via `profiles`/`user_roles`, patients via `patient_portal_accounts`.
+  Both use the same `auth.users` table and the same session cookie
+  mechanism - the distinguishing factor is purely which side table has a
+  matching row for `auth.uid()`.
+- **No fabricated payment processing**: the pay dialog states plainly
+  "Demo mode - this simulates a payment being applied... no real card is
+  charged," matching Module 16's Billing & Plan disclosure and the
+  eligibility/ERA honesty notes from Modules 8-9.
+- **Defense in depth via RLS even though the app never queries through
+  it**: `patient_portal_accounts`/`invitations` have RLS policies scoped
+  to `patients.view`/`patients.manage` for staff and `auth.uid() = id` for
+  the patient's own row. Every service function still uses the admin
+  client (project-wide convention), but if a raw portal session token
+  ever hit Supabase's REST API directly, `current_organization_id()`
+  returns null for a patient (no `profiles` row), so RLS would deny
+  everything - a real security property, not just documentation.
+
+## 11. Testing
+
+`tests/validations/patient-portal.test.ts` - login, accept-invite
+(password match), and payment amount schemas. `recordPortalPayment()`'s
+line-paydown loop isn't extracted as a pure function (it's tightly
+coupled to sequential DB reads/writes), matching how Module 9's
+`addPaymentAllocation`/`recomputeClaimTotals` are also exercised only
+through the DB-backed service, not unit-tested directly.
+
+## 12. Folder Structure
+
+```
+supabase/migrations/
+  00000000000038_patient_portal_schema.sql
+  00000000000039_patient_portal_rls.sql
+src/lib/validations/patient-portal.ts
+src/lib/services/patient-portal-service.ts
+src/app/api/portal/auth/{login,logout,accept-invite}/route.ts
+src/app/api/portal/claims/[id]/pay/route.ts
+src/app/api/patients/[id]/portal-invite/route.ts
+src/app/(patient-portal)/portal/
+  login/page.tsx
+  accept-invite/page.tsx
+  (authenticated)/{layout,page}.tsx
+  (authenticated)/claims/[id]/page.tsx
+src/components/portal/*
+src/components/patients/portal-access-tab.tsx
+tests/validations/patient-portal.test.ts
+```
+
+## 13. Future Improvements
+
+- **No lockout/2FA on portal login**: `getLockoutStatus()`/
+  `handleFailedLogin()` are keyed to the `profiles` table and silently
+  no-op for a patient email (no matching row), so brute-force protection
+  that exists for staff doesn't actually apply to patients. Login attempts
+  are still logged to `login_attempts` for audit purposes.
+- **No "revoke portal access" action**: once invited/activated, a
+  patient's access can't be turned off from the UI (would need deleting
+  the `patient_portal_accounts` row and the linked `auth.users` entry).
+- **Single-patient scope only**: a guarantor/family account that manages
+  multiple patients' balances isn't supported - each portal account maps
+  to exactly one patient.
+- **Provider/client portal, and the AI module** remain unbuilt.
+
+---
+
 ## Local development
 
 ```bash
