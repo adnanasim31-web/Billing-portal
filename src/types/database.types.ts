@@ -1100,6 +1100,7 @@ export interface Database {
           total_amount: number;
           notes: string | null;
           posted_by: string | null;
+          stripe_payment_intent_id: string | null;
           created_at: string;
         };
         Relationships: [

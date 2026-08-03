@@ -27,6 +27,8 @@
     "@radix-ui/react-switch": "^1.1.2",
     "@radix-ui/react-tabs": "^1.1.2",
     "@radix-ui/react-tooltip": "^1.1.6",
+    "@stripe/react-stripe-js": "^6.8.0",
+    "@stripe/stripe-js": "^9.12.1",
     "@supabase/ssr": "^0.12.3",
     "@supabase/supabase-js": "^2.47.10",
     "@tanstack/react-table": "^8.20.5",
@@ -46,6 +48,7 @@
     "recharts": "^2.15.0",
     "server-only": "^0.0.1",
     "sonner": "^1.7.1",
+    "stripe": "^22.4.0",
     "tailwind-merge": "^2.6.0",
     "zod": "^3.24.1"
   },
