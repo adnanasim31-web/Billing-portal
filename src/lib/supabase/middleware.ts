@@ -55,6 +55,16 @@ export async function updateSession(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
+  // API routes handle their own authentication and return JSON 401/403
+  // responses - never redirect them to a login *page*. Redirecting a
+  // fetch() call (e.g. the login POST itself) to /login breaks the
+  // request: Next.js redirects preserve the method on 307/308, so a POST
+  // to /api/auth/login would get re-sent as a POST to the /login page,
+  // which Vercel's routing layer rejects outright.
+  if (pathname.startsWith("/api/")) {
+    return supabaseResponse;
+  }
+
   if (pathname.startsWith("/portal")) {
     const isPortalPublicRoute = PORTAL_PUBLIC_ROUTES.some((route) => pathname.startsWith(route));
 
