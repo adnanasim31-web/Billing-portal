@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentPortalUser, getPortalClaimById } from "@/lib/services/patient-portal-service";
 import { Badge } from "@/components/ui/badge";
@@ -135,7 +136,12 @@ export default async function PortalClaimDetailPage({ params }: { params: Promis
                       {new Date(`${payment.payment_date}T00:00:00`).toLocaleDateString()}
                     </p>
                   </div>
-                  <span className="font-medium">{currencyFormatter.format(Number(payment.total_amount))}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="font-medium">{currencyFormatter.format(Number(payment.total_amount))}</span>
+                    <Link href={`/portal/payments/${payment.id}`} className="text-xs font-medium text-primary hover:underline">
+                      Receipt
+                    </Link>
+                  </div>
                 </li>
               ))}
             </ul>

@@ -232,6 +232,104 @@ export async function getPortalClaimById(claimId: string, patientId: string, org
   return { claim, lines: lines ?? [], payments: payments ?? [] };
 }
 
+export async function getPortalPaymentHistory(patientId: string, organizationId: string) {
+  const admin = createAdminClient();
+
+  const { data: claims, error: claimsError } = await admin
+    .from("claims")
+    .select(
+      "id, claim_number, service_date_from, service_date_to, providers:provider_id (first_name, last_name, organization_name, provider_type)"
+    )
+    .eq("patient_id", patientId)
+    .eq("organization_id", organizationId);
+  if (claimsError) throw claimsError;
+  if (!claims || claims.length === 0) return [];
+
+  const claimsById = new Map(claims.map((claim) => [claim.id, claim]));
+
+  const { data: payments, error: paymentsError } = await admin
+    .from("payments")
+    .select("id, claim_id, payer_name, payment_method, payment_date, total_amount, reference_number")
+    .eq("organization_id", organizationId)
+    .in("claim_id", claims.map((claim) => claim.id))
+    .order("payment_date", { ascending: false });
+  if (paymentsError) throw paymentsError;
+
+  return (payments ?? []).map((payment) => ({
+    ...payment,
+    claim: claimsById.get(payment.claim_id) ?? null,
+  }));
+}
+
+export async function getPortalPaymentReceipt(paymentId: string, patientId: string, organizationId: string) {
+  const admin = createAdminClient();
+
+  const { data: payment, error: paymentError } = await admin
+    .from("payments")
+    .select("*")
+    .eq("id", paymentId)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  if (paymentError) throw paymentError;
+  if (!payment) return null;
+
+  const { data: claim, error: claimError } = await admin
+    .from("claims")
+    .select(
+      "id, claim_number, service_date_from, service_date_to, providers:provider_id (first_name, last_name, organization_name, provider_type)"
+    )
+    .eq("id", payment.claim_id)
+    .eq("patient_id", patientId)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  if (claimError) throw claimError;
+  if (!claim) return null; // Not this patient's payment - treat as not found.
+
+  const { data: allocations, error: allocationsError } = await admin
+    .from("payment_allocations")
+    .select("id, claim_line_id, paid_amount, adjustment_amount, adjustment_reason")
+    .eq("payment_id", paymentId);
+  if (allocationsError) throw allocationsError;
+
+  const claimLineIds = (allocations ?? []).map((allocation) => allocation.claim_line_id);
+  let lines: { id: string; line_number: number; procedure_codes: { code: string; description: string } | null }[] = [];
+  if (claimLineIds.length > 0) {
+    const { data, error: linesError } = await admin
+      .from("claim_lines")
+      .select("id, line_number, procedure_codes:procedure_code (code, description)")
+      .in("id", claimLineIds);
+    if (linesError) throw linesError;
+    lines = data ?? [];
+  }
+  const linesById = new Map(lines.map((line) => [line.id, line]));
+
+  const [{ data: organization, error: orgError }, { data: patient, error: patientError }] = await Promise.all([
+    admin
+      .from("organizations")
+      .select("name, phone, billing_email, address_line1, address_line2, city, state, postal_code")
+      .eq("id", organizationId)
+      .maybeSingle(),
+    admin
+      .from("patients")
+      .select("first_name, last_name, address_line1, address_line2, city, state, postal_code")
+      .eq("id", patientId)
+      .maybeSingle(),
+  ]);
+  if (orgError) throw orgError;
+  if (patientError) throw patientError;
+
+  return {
+    payment,
+    claim,
+    organization,
+    patient,
+    allocations: (allocations ?? []).map((allocation) => ({
+      ...allocation,
+      line: linesById.get(allocation.claim_line_id) ?? null,
+    })),
+  };
+}
+
 /**
  * Called from the Stripe webhook once a card charge has actually succeeded -
  * pays down the claim's lines in order until the amount is exhausted.

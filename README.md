@@ -3387,6 +3387,48 @@ pass.
 
 ---
 
+# Patient Portal: Payment History with Downloadable Receipts
+
+The portal could take a payment but had no way to look back at past ones -
+`payments` rows existed (recorded by the Stripe webhook), but nothing
+patient-facing ever read them back. Adds `/portal/payments` (a list of
+every payment made across all of a patient's statements) and
+`/portal/payments/[id]` (a full receipt for one payment: organization
+letterhead, billed-to address, statement/provider info, an itemized table
+of `payment_allocations` by procedure code, and the payment method/total).
+
+`payments` has no `patient_id` column - it only reaches a patient through
+`claim_id`. `getPortalPaymentHistory` fetches the patient's claims first
+(with an embedded `providers` join, same pattern already used elsewhere in
+this service), then fetches payments filtered by that claim-ID list and
+joins them back to the claim map in JS, rather than attempting a
+multi-level PostgREST embed - matching this file's existing style of
+several flat queries over one large nested `select()`.
+`getPortalPaymentReceipt` re-verifies the payment's claim actually belongs
+to the requesting patient (`.eq("patient_id", patientId)`) before returning
+anything - the same defense used throughout this service against a patient
+guessing another patient's ID, since none of this goes through
+Postgres RLS (everything here uses the admin/service-role client, scoped
+by application-level `WHERE` clauses instead).
+
+No PDF library was added - the receipt page is a normal print-optimized
+page with a "Download / print" button that calls `window.print()`, and
+`PortalHeader`'s `<header>` now carries a `print:hidden` class so the nav
+chrome doesn't show up in the printed/saved-as-PDF output. `PortalHeader`
+also gained actual navigation links ("Statements" / "Payment history") -
+it previously had none beyond the logo and sign-out button, so the new
+page would otherwise have been unreachable from the UI.
+
+## Testing
+
+Full typecheck/lint/228-test suite/build pass, plus a route-level smoke
+test via `curl` confirming `/portal/payments` and `/portal/payments/[id]`
+both redirect cleanly to `/portal/login` when unauthenticated (no server
+crash) rather than testing full data rendering, which needs a real
+Supabase session.
+
+---
+
 ## Local development
 
 ```bash
