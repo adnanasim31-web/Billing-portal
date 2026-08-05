@@ -13,6 +13,13 @@ const STAFF_PUBLIC_ROUTES = [
 
 const PORTAL_PUBLIC_ROUTES = ["/portal/login", "/portal/accept-invite"];
 
+// Optional dedicated hostname for the patient portal (e.g. a second
+// *.vercel.app alias on the same project). When a request's Host header
+// matches this, "/" is treated as "/portal" so patients land straight in
+// their portal instead of the staff app's root. Unset by default - the
+// staff domain's behavior is completely unaffected.
+const PATIENT_PORTAL_HOST = process.env.PATIENT_PORTAL_HOST ?? "";
+
 /**
  * Refreshes the Supabase auth session on every request and redirects
  * unauthenticated users away from protected routes / authenticated users
@@ -53,7 +60,10 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { pathname } = request.nextUrl;
+  const realPathname = request.nextUrl.pathname;
+  const hostname = request.headers.get("host") ?? "";
+  const isPatientPortalHost = PATIENT_PORTAL_HOST.length > 0 && hostname === PATIENT_PORTAL_HOST;
+  const pathname = isPatientPortalHost && realPathname === "/" ? "/portal" : realPathname;
 
   // API routes handle their own authentication and return JSON 401/403
   // responses - never redirect them to a login *page*. Redirecting a
@@ -90,6 +100,15 @@ export async function updateSession(request: NextRequest) {
         redirectUrl.search = "";
         return NextResponse.redirect(redirectUrl);
       }
+    }
+
+    // The patient-portal host's root ("/") was mapped to "/portal" above -
+    // rewrite so Next.js actually renders the portal instead of the
+    // default (staff) root page, while keeping the address bar at "/".
+    if (realPathname !== pathname) {
+      const rewriteUrl = request.nextUrl.clone();
+      rewriteUrl.pathname = pathname;
+      return NextResponse.rewrite(rewriteUrl);
     }
 
     return supabaseResponse;
