@@ -5,6 +5,7 @@ import { getProviderById } from "@/lib/services/provider-service";
 import { listProviderSchedule } from "@/lib/services/provider-schedule-service";
 import { listClaimsForProvider } from "@/lib/services/claim-service";
 import { listCredentialsForProvider } from "@/lib/services/credentialing-service";
+import { listProviderMessages } from "@/lib/services/provider-messaging-service";
 import { PERMISSIONS } from "@/lib/constants/permissions";
 import { ProviderHeader } from "@/components/providers/provider-header";
 import { ProviderTabs } from "@/components/providers/provider-tabs";
@@ -21,10 +22,11 @@ export default async function ProviderProfilePage({ params }: { params: Promise<
   if (!provider) notFound();
 
   const canViewCredentialing = hasPermission(user, PERMISSIONS.CREDENTIALING_VIEW);
-  const [schedule, claims, credentials] = await Promise.all([
+  const [schedule, claims, credentials, messages] = await Promise.all([
     listProviderSchedule(id, user.organizationId),
     listClaimsForProvider(id, user.organizationId),
     canViewCredentialing ? listCredentialsForProvider(id, user.organizationId) : Promise.resolve(null),
+    listProviderMessages(id, user.organizationId),
   ]);
 
   const displayName =
@@ -46,6 +48,7 @@ export default async function ProviderProfilePage({ params }: { params: Promise<
 
       <ProviderTabs
         providerId={provider.id}
+        providerName={displayName}
         overview={{
           taxId: provider.tax_id,
           taxonomyCode: provider.taxonomy_code,
@@ -85,6 +88,19 @@ export default async function ProviderProfilePage({ params }: { params: Promise<
             : null
         }
         canManageCredentialing={hasPermission(user, PERMISSIONS.CREDENTIALING_MANAGE)}
+        messages={messages.map((m) => ({
+          id: m.id,
+          body: m.body,
+          senderType: m.sender_type,
+          senderName:
+            m.sender_type === "staff"
+              ? m.profiles
+                ? `${m.profiles.first_name} ${m.profiles.last_name}`
+                : "Staff"
+              : displayName,
+          createdAt: m.created_at,
+        }))}
+        canReplyMessages={hasPermission(user, PERMISSIONS.PROVIDERS_MANAGE)}
       />
     </div>
   );

@@ -1586,6 +1586,48 @@ export interface Database {
         };
         Update: Partial<Database["public"]["Tables"]["provider_portal_accounts"]["Row"]>;
       };
+      provider_messages: {
+        Row: {
+          id: string;
+          organization_id: string;
+          provider_id: string;
+          sender_type: "provider" | "staff";
+          sender_profile_id: string | null;
+          sender_provider_account_id: string | null;
+          body: string;
+          created_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "provider_messages_provider_id_fkey";
+            columns: ["provider_id"];
+            isOneToOne: false;
+            referencedRelation: "providers";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "provider_messages_sender_profile_id_fkey";
+            columns: ["sender_profile_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "provider_messages_sender_provider_account_id_fkey";
+            columns: ["sender_provider_account_id"];
+            isOneToOne: false;
+            referencedRelation: "provider_portal_accounts";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["provider_messages"]["Row"]> & {
+          organization_id: string;
+          provider_id: string;
+          sender_type: "provider" | "staff";
+          body: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["provider_messages"]["Row"]>;
+      };
     };
     Views: Record<string, never>;
     Functions: {

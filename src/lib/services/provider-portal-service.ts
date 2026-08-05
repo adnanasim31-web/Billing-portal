@@ -7,7 +7,25 @@ import {
   deleteProviderScheduleBlock,
   listProviderSchedule,
 } from "@/lib/services/provider-schedule-service";
-import type { ProviderPortalCredentialsInput, ProviderScheduleInput } from "@/lib/validations/providers";
+import {
+  listProviderMessages,
+  postProviderMessageAsProvider,
+} from "@/lib/services/provider-messaging-service";
+import {
+  buildDocumentStoragePath,
+  createDocument,
+  createSignedUploadUrl,
+  deleteDocument,
+  listDocuments,
+} from "@/lib/services/document-service";
+import type {
+  ProviderPortalCredentialsInput,
+  ProviderScheduleInput,
+} from "@/lib/validations/providers";
+import type {
+  ProviderMessageInput,
+} from "@/lib/validations/provider-messaging";
+import type { ProviderPortalDocumentMetaInput } from "@/lib/validations/provider-portal";
 
 export interface ProviderPortalUser {
   id: string;
@@ -257,4 +275,190 @@ export async function deleteProviderPortalScheduleBlock(params: {
     organizationId: params.organizationId,
     actingUserId: null,
   });
+}
+
+/** The provider's one conversation thread with the billing office. */
+export async function getProviderPortalMessages(providerId: string, organizationId: string) {
+  return listProviderMessages(providerId, organizationId);
+}
+
+export async function postProviderPortalMessage(params: {
+  providerId: string;
+  organizationId: string;
+  senderProviderAccountId: string;
+  input: ProviderMessageInput;
+}) {
+  return postProviderMessageAsProvider({
+    providerId: params.providerId,
+    organizationId: params.organizationId,
+    senderProviderAccountId: params.senderProviderAccountId,
+    input: params.input,
+  });
+}
+
+const PROVIDER_DOCUMENT_CATEGORY = "provider_credential" as const;
+
+/**
+ * Reuses Module 14's polymorphic `documents` table (entity_type="provider")
+ * rather than a new table - it was already designed to be taggable to a
+ * provider record.
+ */
+export async function getProviderPortalDocuments(providerId: string, organizationId: string) {
+  const { documents } = await listDocuments({
+    organizationId,
+    entityType: "provider",
+    entityId: providerId,
+    pageSize: 100,
+  });
+  return documents;
+}
+
+export function buildProviderPortalDocumentPath(params: { organizationId: string; fileName: string }) {
+  return buildDocumentStoragePath({
+    organizationId: params.organizationId,
+    category: PROVIDER_DOCUMENT_CATEGORY,
+    fileName: params.fileName,
+  });
+}
+
+export async function createProviderPortalUploadUrl(path: string) {
+  return createSignedUploadUrl(path);
+}
+
+export async function createProviderPortalDocument(params: {
+  providerId: string;
+  organizationId: string;
+  input: ProviderPortalDocumentMetaInput;
+}) {
+  return createDocument({
+    organizationId: params.organizationId,
+    uploadedBy: null,
+    input: {
+      fileName: params.input.fileName,
+      filePath: params.input.filePath,
+      fileSize: params.input.fileSize,
+      mimeType: params.input.mimeType,
+      category: PROVIDER_DOCUMENT_CATEGORY,
+      entityType: "provider",
+      entityId: params.providerId,
+      notes: params.input.notes ?? "",
+    },
+  });
+}
+
+/**
+ * Provider self-service delete - verifies the document actually belongs to
+ * this provider before delegating to the shared deleteDocument (which only
+ * scopes by organizationId), the same ownership-check pattern already used
+ * for deleteProviderPortalScheduleBlock.
+ */
+export async function deleteProviderPortalDocument(params: {
+  documentId: string;
+  providerId: string;
+  organizationId: string;
+}) {
+  const admin = createAdminClient();
+  const { data: doc, error } = await admin
+    .from("documents")
+    .select("id")
+    .eq("id", params.documentId)
+    .eq("organization_id", params.organizationId)
+    .eq("entity_type", "provider")
+    .eq("entity_id", params.providerId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!doc) throw new Error("Document not found");
+
+  return deleteDocument({
+    documentId: params.documentId,
+    organizationId: params.organizationId,
+    actingUserId: null,
+  });
+}
+
+export interface ProviderPortalOverviewStats {
+  appointmentsTodayCount: number;
+  nextAppointment: { id: string; scheduledStart: string; patientName: string } | null;
+  pendingClaimsCount: number;
+  credentialsExpiringSoonCount: number;
+}
+
+const PENDING_CLAIM_STATUSES = ["draft", "ready", "submitted"] as const;
+const CREDENTIALS_EXPIRING_SOON_DAYS = 30;
+
+/**
+ * Lightweight, purpose-built counts for the portal home page - deliberately
+ * not reusing getProviderPortalAppointments/getProviderPortalClaims/
+ * getProviderPortalCredentials, which pull up to 100 unfiltered rows each
+ * and would be wasteful (and semantically wrong) for a KPI count.
+ * "Pending" claims = draft/ready/submitted (not yet resolved either way) -
+ * there's no single ClaimStatus value that means "pending".
+ */
+export async function getProviderPortalOverviewStats(
+  providerId: string,
+  organizationId: string
+): Promise<ProviderPortalOverviewStats> {
+  const admin = createAdminClient();
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  const startOfTomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
+  const expiringSoonCutoff = new Date(now.getTime() + CREDENTIALS_EXPIRING_SOON_DAYS * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+
+  const [todayAppointments, nextAppointmentResult, pendingClaims, expiringCredentials] = await Promise.all([
+    admin
+      .from("appointments")
+      .select("id", { count: "exact", head: true })
+      .eq("provider_id", providerId)
+      .eq("organization_id", organizationId)
+      .gte("scheduled_start", startOfToday)
+      .lt("scheduled_start", startOfTomorrow),
+    admin
+      .from("appointments")
+      .select("id, scheduled_start, patients:patient_id (first_name, last_name)")
+      .eq("provider_id", providerId)
+      .eq("organization_id", organizationId)
+      .gte("scheduled_start", now.toISOString())
+      .in("status", ["scheduled", "checked_in", "in_progress"])
+      .order("scheduled_start", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    admin
+      .from("claims")
+      .select("id", { count: "exact", head: true })
+      .eq("provider_id", providerId)
+      .eq("organization_id", organizationId)
+      .in("status", PENDING_CLAIM_STATUSES),
+    admin
+      .from("provider_credentials")
+      .select("id", { count: "exact", head: true })
+      .eq("provider_id", providerId)
+      .eq("organization_id", organizationId)
+      .not("expiration_date", "is", null)
+      .lte("expiration_date", expiringSoonCutoff),
+  ]);
+
+  if (todayAppointments.error) throw todayAppointments.error;
+  if (nextAppointmentResult.error) throw nextAppointmentResult.error;
+  if (pendingClaims.error) throw pendingClaims.error;
+  if (expiringCredentials.error) throw expiringCredentials.error;
+
+  const nextAppt = nextAppointmentResult.data;
+
+  return {
+    appointmentsTodayCount: todayAppointments.count ?? 0,
+    nextAppointment: nextAppt
+      ? {
+          id: nextAppt.id,
+          scheduledStart: nextAppt.scheduled_start,
+          patientName: nextAppt.patients
+            ? `${nextAppt.patients.first_name} ${nextAppt.patients.last_name}`
+            : "Unknown patient",
+        }
+      : null,
+    pendingClaimsCount: pendingClaims.count ?? 0,
+    credentialsExpiringSoonCount: expiringCredentials.count ?? 0,
+  };
 }

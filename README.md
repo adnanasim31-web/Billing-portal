@@ -3674,16 +3674,79 @@ same cross-realm guard pattern: a staff member wandering onto
 `provider_portal_accounts` row, preventing the redirect-loop class of bug
 the Patient Portal already ran into.
 
+## Messaging with the billing office
+
+Providers can message the billing office directly instead of claims and
+credentialing being read-only dead ends. Deliberately **not** built on
+Module 15's `message_channels`/`messages` tables - those model an
+org-wide public bulletin board (any staff member with `messaging.use`
+sees every channel) with `messages.author_id` hard-FK'd to `profiles(id)`.
+Neither property fits: a provider's conversation with billing must stay
+private to that provider, and the sender is often a
+`provider_portal_accounts` row, which isn't a `profiles` row and would
+violate that FK on insert.
+
+Instead, a new `provider_messages` table models one flat, implicit
+thread per provider - every row for a given `provider_id` *is* that
+provider's one conversation, ordered by `created_at`, no separate
+threads/participants table needed since there's exactly one thread per
+provider by design. A `sender_type` discriminator (`'provider' |
+'staff'`) plus a nullable `sender_profile_id`/`sender_provider_account_id`
+pair (with a check constraint enforcing exactly one is set for each type)
+lets either side post without an FK violation. The provider side posts
+from `/provider/messages` (`ProviderPortalMessagesTab`); the staff side
+replies from a new **Messages** tab on the staff-facing provider profile
+page (`ProviderMessagesTab`, gated to reply on `providers.manage`,
+reusing the same `providerMessageSchema` and `provider-messaging-service.ts`
+functions both realms share).
+
+## Documents
+
+Reuses Module 14's polymorphic `documents` table (`entity_type:
+"provider"`, `entity_id: providerId`, `category: "provider_credential"`)
+rather than a new table - it was already designed to be taggable to a
+provider record, and the existing staff `/documents` page already lists
+it (filterable by the `provider_credential` category), so provider
+uploads are visible to staff with no additional UI work. `listDocuments`
+gained optional `entityType`/`entityId` filters (backward compatible -
+existing staff callers are unaffected) so
+`getProviderPortalDocuments` can scope to just this provider's uploads.
+`createDocument`/`deleteDocument`'s `uploadedBy`/`actingUserId` params
+were widened to `string | null`, the same FK caution applied throughout
+this codebase for portal-initiated writes (a provider portal account
+isn't a `profiles` row). Deletes verify the target document's
+`entity_id` actually matches the requesting provider before delegating
+to the shared `deleteDocument` - the same ownership-check pattern used
+for `deleteProviderPortalScheduleBlock` - since the underlying function
+only scopes by `organizationId`. Uploads reuse the existing
+`organization-documents` Storage bucket and signed-upload-URL flow
+directly, no new bucket needed.
+
+## Home overview page
+
+`/provider` was the appointments list; it's now a KPI overview (today's
+appointment count and next appointment, pending claims count, credentials
+expiring within 30 days, plus a shortcut into Messages), and the
+appointments list moved to its own `/provider/appointments` route so
+every section has an equivalent top-level nav entry. The KPIs are
+purpose-built, lighter queries (`getProviderPortalOverviewStats`) rather
+than reusing `getProviderPortalAppointments`/`getProviderPortalClaims`/
+`getProviderPortalCredentials`, which each pull up to 100 unfiltered
+rows and would be wasteful (and semantically wrong) for a count. "Pending
+claims" is defined as `draft`/`ready`/`submitted` - there's no single
+`ClaimStatus` value that means "pending," so this is a documented
+choice, not a database constraint.
+
 ## Testing
 
-Full typecheck/lint/240-test suite/build pass (7 new validation tests).
-Verified via `curl`: `/provider/login` returns 200 unauthenticated,
-`/provider`, `/provider/claims`, `/provider/credentialing`, and
-`/provider/availability` all redirect to `/provider/login`
-unauthenticated, `POST /api/provider/auth/login`, `GET
-/api/providers/[id]/portal-access`, and `GET /api/provider/schedule` all
-return proper 401 JSON rather than a redirect, and the existing staff
-`/login` and `/dashboard` behavior is unchanged.
+Full typecheck/lint/247-test suite/build pass (14 new validation tests
+across two new test files plus additions to the existing provider-portal
+suite). Verified via a placeholder-env production build that every new
+route and API endpoint compiles and appears in the route manifest:
+`/provider` (overview), `/provider/appointments`, `/provider/messages`,
+`/provider/documents`, `/api/provider/messages`, `/api/provider/documents`,
+`/api/provider/documents/upload-url`, `/api/provider/documents/[documentId]`,
+and the staff-side `/api/providers/[id]/messages`.
 
 ---
 

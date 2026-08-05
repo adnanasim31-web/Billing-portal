@@ -6,7 +6,7 @@ import { ProviderPortalMobileNav } from "@/components/provider-portal/provider-p
 import { ProviderPortalUserMenu } from "@/components/provider-portal/provider-portal-user-menu";
 
 function resolveTitle(pathname: string): string {
-  if (pathname === "/provider") return "Appointments";
+  if (pathname === "/provider") return "Overview";
   const match = PROVIDER_PORTAL_NAV.find((item) => item.href !== "/provider" && pathname.startsWith(item.href));
   return match?.label ?? "Provider Portal";
 }

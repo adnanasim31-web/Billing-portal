@@ -6,10 +6,12 @@ import { ProviderOverviewTab } from "@/components/providers/provider-overview-ta
 import { ScheduleTab, type ScheduleBlockRow } from "@/components/providers/schedule-tab";
 import { ProviderClaimsTab, type ProviderClaimRow } from "@/components/providers/provider-claims-tab";
 import { ProviderCredentialingTab, type ProviderCredentialRow } from "@/components/providers/provider-credentialing-tab";
+import { ProviderMessagesTab, type ProviderMessageRow } from "@/components/providers/provider-messages-tab";
 import { UpcomingModulePlaceholder } from "@/components/shared/upcoming-module-placeholder";
 
 interface ProviderTabsProps {
   providerId: string;
+  providerName: string;
   overview: {
     taxId: string | null;
     taxonomyCode: string | null;
@@ -24,15 +26,20 @@ interface ProviderTabsProps {
   claims: ProviderClaimRow[];
   credentials: ProviderCredentialRow[] | null;
   canManageCredentialing: boolean;
+  messages: ProviderMessageRow[];
+  canReplyMessages: boolean;
 }
 
 export function ProviderTabs({
   providerId,
+  providerName,
   overview,
   schedule,
   claims,
   credentials,
   canManageCredentialing,
+  messages,
+  canReplyMessages,
 }: ProviderTabsProps) {
   return (
     <Tabs defaultValue="overview">
@@ -42,6 +49,7 @@ export function ProviderTabs({
         <TabsTrigger value="claims">Claims ({claims.length})</TabsTrigger>
         <TabsTrigger value="performance">Performance &amp; Revenue</TabsTrigger>
         {credentials && <TabsTrigger value="credentialing">Credentialing ({credentials.length})</TabsTrigger>}
+        <TabsTrigger value="messages">Messages ({messages.length})</TabsTrigger>
       </TabsList>
 
       <TabsContent value="overview">
@@ -69,6 +77,14 @@ export function ProviderTabs({
           />
         </TabsContent>
       )}
+      <TabsContent value="messages">
+        <ProviderMessagesTab
+          providerId={providerId}
+          providerName={providerName}
+          initialMessages={messages}
+          canReply={canReplyMessages}
+        />
+      </TabsContent>
     </Tabs>
   );
 }
