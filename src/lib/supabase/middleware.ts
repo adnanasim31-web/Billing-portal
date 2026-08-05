@@ -11,7 +11,12 @@ const STAFF_PUBLIC_ROUTES = [
   "/accept-invite",
 ];
 
-const PORTAL_PUBLIC_ROUTES = ["/portal/login", "/portal/accept-invite"];
+const PORTAL_PUBLIC_ROUTES = [
+  "/portal/login",
+  "/portal/accept-invite",
+  "/portal/forgot-password",
+  "/portal/reset-password",
+];
 
 // Optional dedicated hostname for the patient portal (e.g. a second
 // *.vercel.app alias on the same project). When a request's Host header
@@ -84,7 +89,10 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(redirectUrl);
     }
 
-    if (user && isPortalPublicRoute) {
+    // /portal/reset-password needs the recovery-link session to reach the
+    // page - bouncing it away as "already logged in" would make the reset
+    // impossible to complete, mirroring the staff side's own exclusion.
+    if (user && isPortalPublicRoute && pathname !== "/portal/reset-password") {
       // Only bounce away if this session is actually a patient portal
       // account - a staff member who wandered onto /portal/login should
       // just see the page, not get force-redirected in a loop against
