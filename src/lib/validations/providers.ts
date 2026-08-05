@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { passwordSchema } from "@/lib/validations/auth";
 
 const optionalPhone = z
   .string()
@@ -74,3 +75,13 @@ export const providerSearchSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
 });
 export type ProviderSearchInput = z.infer<typeof providerSearchSchema>;
+
+// Portal login credentials, set directly by staff rather than via an emailed
+// invite link (unlike the patient portal). Both optional at the schema level
+// - whether they're actually required depends on whether this provider
+// already has a portal account, which the API route checks at request time.
+export const providerPortalCredentialsSchema = z.object({
+  email: z.string().email("Enter a valid email").optional().or(z.literal("")),
+  password: passwordSchema.optional().or(z.literal("")),
+});
+export type ProviderPortalCredentialsInput = z.infer<typeof providerPortalCredentialsSchema>;

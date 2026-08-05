@@ -3535,6 +3535,91 @@ typecheck/lint/233-test suite/build pass.
 
 ---
 
+# Module 19: Provider Portal
+
+A third external, non-staff login realm - alongside staff (`profiles`)
+and the Patient Portal (`patient_portal_accounts`) - so a rendering
+provider can sign in separately to see their own appointment schedule,
+claims, and credentialing status. `provider_portal_accounts` links an
+`auth.users` row to exactly one `providers` row, the same "no roles or
+permissions of its own, access scoped by which single record this
+account belongs to" shape as the Patient Portal.
+
+## Credentials: set directly by staff, not an emailed invite
+
+Unlike the Patient Portal's invite-link flow, a provider's portal email
+and password are set directly on the **Add Provider** / **Edit
+Provider** form (`ProviderPortalAccessForm`, rendered inside
+`ProviderForm`) - staff type in both fields and the account is active
+immediately, no email step, no activation link. This means staff end up
+knowing the provider's password; the form's helper text says so
+explicitly ("share it with them directly") so nobody's under the
+illusion this is anonymous. Leaving both fields blank when adding or
+editing a provider skips portal setup entirely; leaving just the
+password blank on an existing account means "keep the current
+password," letting staff change only the login email if needed.
+
+`recordPatientDocument`-style FK caution applied again here:
+`setProviderPortalCredentials` in `provider-portal-service.ts` creates
+the `auth.users` row via `admin.auth.admin.createUser` on first setup
+(email + password required), or calls `admin.auth.admin.updateUserById`
+on subsequent calls (email and/or password, whichever changed) -
+`getProviderPortalAccountStatus` (mirroring the Patient Portal's
+identical function) tells the form which case it's in.
+
+## Dashboard: appointments, claims, credentialing
+
+`/provider` is a single page with three tabs (`Tabs`/`TabsContent`, same
+primitive the patient profile page's tabs already use) rather than
+separate routes - the provider-portal equivalent of `PatientTabs`, just
+read-only and scoped to one provider instead of one patient:
+
+- **Appointments** - every `appointments` row for this `provider_id`.
+- **Claims** - every `claims` row for this `provider_id`, with the
+  patient's name and remaining balance.
+- **Credentialing** - `provider_credentials` for this provider, reusing
+  `CREDENTIAL_TYPE_LABELS`/`CREDENTIAL_STATUS_LABELS`/`CREDENTIAL_STATUS_VARIANT`
+  (already exported from the staff credentialing table component) and
+  `isExpired`/`isExpiringSoon` from `credentialing-status.ts`, instead of
+  redefining any of that.
+
+## Naming collision caught before it shipped
+
+The staff side already has `src/components/providers/provider-header.tsx`,
+`provider-claims-tab.tsx`, and `provider-credentialing-tab.tsx` (plural
+`providers/` directory, for the staff-facing provider profile page). The
+first pass at this module put the new portal-facing components in a
+sibling `provider/` (singular) directory with the *same file names and
+exported component names* - `ProviderHeader`, `ProviderClaimsTab`,
+`ProviderCredentialingTab` would have existed twice, in different
+modules, meaning no compiler error but a real landmine for anyone
+searching the codebase or `grep`-ing for one of those names. Renamed the
+whole portal-facing set into `src/components/provider-portal/` with a
+`ProviderPortal*` prefix on every export - mirroring exactly why the
+Patient Portal's own components are prefixed `Portal*` rather than
+`Patient*`, for the identical reason (staff already owns `Patient*`).
+
+## Middleware: a third realm
+
+Added `/provider/*` as a third branch in `updateSession()` alongside
+`/portal/*`, with its own `PROVIDER_PUBLIC_ROUTES` (`/provider/login`
+only - no invite/forgot-password routes exist for this realm) and the
+same cross-realm guard pattern: a staff member wandering onto
+`/provider/login` isn't force-redirected unless they actually have a
+`provider_portal_accounts` row, preventing the redirect-loop class of bug
+the Patient Portal already ran into.
+
+## Testing
+
+Full typecheck/lint/240-test suite/build pass (7 new validation tests).
+Verified via `curl`: `/provider/login` returns 200 unauthenticated,
+`/provider` redirects to `/provider/login` unauthenticated, `POST
+/api/provider/auth/login` and `GET /api/providers/[id]/portal-access`
+both return proper 401 JSON rather than a redirect, and the existing
+staff `/login` and `/dashboard` behavior is unchanged.
+
+---
+
 ## Local development
 
 ```bash

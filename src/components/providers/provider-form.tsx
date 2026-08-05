@@ -6,11 +6,11 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { providerSchema, type ProviderInput } from "@/lib/validations/providers";
+import { providerPortalCredentialsSchema, providerSchema, type ProviderInput } from "@/lib/validations/providers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import {
   Form,
   FormControl,
@@ -19,10 +19,16 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
+import {
+  ProviderPortalAccessForm,
+  type ProviderPortalAccessStatus,
+  type ProviderPortalCredentialsValue,
+} from "@/components/providers/provider-portal-access-form";
 
 interface ProviderFormProps {
   providerId?: string;
   defaultValues?: Partial<ProviderInput>;
+  portalAccessStatus?: ProviderPortalAccessStatus;
 }
 
 const EMPTY_DEFAULTS: ProviderInput = {
@@ -43,10 +49,15 @@ const EMPTY_DEFAULTS: ProviderInput = {
   status: "active",
 };
 
-export function ProviderForm({ providerId, defaultValues }: ProviderFormProps) {
+export function ProviderForm({ providerId, defaultValues, portalAccessStatus }: ProviderFormProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [portalCredentials, setPortalCredentials] = React.useState<ProviderPortalCredentialsValue>({
+    email: portalAccessStatus?.email ?? "",
+    password: "",
+  });
   const isEdit = !!providerId;
+  const resolvedPortalStatus: ProviderPortalAccessStatus = portalAccessStatus ?? { state: "none" };
 
   const form = useForm<ProviderInput>({
     resolver: zodResolver(providerSchema),
@@ -68,6 +79,27 @@ export function ProviderForm({ providerId, defaultValues }: ProviderFormProps) {
       if (!res.ok) {
         toast.error(data.error ?? "Unable to save provider");
         return;
+      }
+
+      if (portalCredentials.email || portalCredentials.password) {
+        const parsedCredentials = providerPortalCredentialsSchema.safeParse(portalCredentials);
+        if (!parsedCredentials.success) {
+          toast.error(parsedCredentials.error.issues[0]?.message ?? "Enter a valid portal email/password");
+          return;
+        }
+
+        const portalRes = await fetch(`/api/providers/${data.id}/portal-access`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(parsedCredentials.data),
+        });
+        const portalData = await portalRes.json().catch(() => ({}));
+        if (!portalRes.ok) {
+          toast.error(portalData.error ?? "Provider saved, but portal access couldn't be set up");
+          router.push(`/providers/${data.id}`);
+          router.refresh();
+          return;
+        }
       }
 
       toast.success(isEdit ? "Provider updated" : "Provider added");
@@ -319,16 +351,23 @@ export function ProviderForm({ providerId, defaultValues }: ProviderFormProps) {
               )}
             />
           </CardContent>
-          <CardFooter className="justify-end gap-2 border-t border-border pt-6">
-            <Button type="button" variant="outline" onClick={() => router.back()}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
-              {isEdit ? "Save changes" : "Add provider"}
-            </Button>
-          </CardFooter>
         </Card>
+
+        <ProviderPortalAccessForm
+          status={resolvedPortalStatus}
+          value={portalCredentials}
+          onChange={setPortalCredentials}
+        />
+
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="outline" onClick={() => router.back()}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+            {isEdit ? "Save changes" : "Add provider"}
+          </Button>
+        </div>
       </form>
     </Form>
   );

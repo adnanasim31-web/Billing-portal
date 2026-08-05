@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentUser, hasPermission } from "@/lib/services/current-user-service";
 import { getProviderById } from "@/lib/services/provider-service";
+import { getProviderPortalAccountStatus } from "@/lib/services/provider-portal-service";
 import { PERMISSIONS } from "@/lib/constants/permissions";
 import { PageHeader } from "@/components/shared/page-header";
 import { ProviderForm } from "@/components/providers/provider-form";
@@ -16,6 +17,8 @@ export default async function EditProviderPage({ params }: { params: Promise<{ i
   const { id } = await params;
   const provider = await getProviderById(id, user.organizationId);
   if (!provider) notFound();
+
+  const portalAccessStatus = await getProviderPortalAccountStatus(id, user.organizationId);
 
   const displayName =
     provider.provider_type === "organization"
@@ -43,6 +46,11 @@ export default async function EditProviderPage({ params }: { params: Promise<{ i
           email: provider.email ?? "",
           phone: provider.phone ?? "",
           status: provider.status,
+        }}
+        portalAccessStatus={{
+          state: portalAccessStatus.state,
+          email: "email" in portalAccessStatus ? portalAccessStatus.email : undefined,
+          lastLoginAt: "last_login_at" in portalAccessStatus ? portalAccessStatus.last_login_at : undefined,
         }}
       />
     </div>

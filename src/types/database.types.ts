@@ -1551,6 +1551,41 @@ export interface Database {
         };
         Update: Partial<Database["public"]["Tables"]["patient_portal_accounts"]["Row"]>;
       };
+      provider_portal_accounts: {
+        Row: {
+          id: string;
+          organization_id: string;
+          provider_id: string;
+          email: string;
+          set_by: string | null;
+          last_login_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "provider_portal_accounts_provider_id_fkey";
+            columns: ["provider_id"];
+            isOneToOne: true;
+            referencedRelation: "providers";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "provider_portal_accounts_set_by_fkey";
+            columns: ["set_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["provider_portal_accounts"]["Row"]> & {
+          id: string;
+          organization_id: string;
+          provider_id: string;
+          email: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["provider_portal_accounts"]["Row"]>;
+      };
     };
     Views: Record<string, never>;
     Functions: {
