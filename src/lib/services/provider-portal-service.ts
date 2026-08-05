@@ -2,7 +2,12 @@ import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { recordAuditLog } from "@/lib/services/audit-service";
-import type { ProviderPortalCredentialsInput } from "@/lib/validations/providers";
+import {
+  addProviderScheduleBlock,
+  deleteProviderScheduleBlock,
+  listProviderSchedule,
+} from "@/lib/services/provider-schedule-service";
+import type { ProviderPortalCredentialsInput, ProviderScheduleInput } from "@/lib/validations/providers";
 
 export interface ProviderPortalUser {
   id: string;
@@ -203,4 +208,53 @@ export async function getProviderPortalCredentials(providerId: string, organizat
     .order("expiration_date", { ascending: true, nullsFirst: false });
   if (error) throw error;
   return data ?? [];
+}
+
+export async function getProviderPortalSchedule(providerId: string, organizationId: string) {
+  return listProviderSchedule(providerId, organizationId);
+}
+
+/** Provider self-service add - actingUserId is null (no staff profile row to attribute this to). */
+export async function addProviderPortalScheduleBlock(params: {
+  providerId: string;
+  organizationId: string;
+  input: ProviderScheduleInput;
+}) {
+  return addProviderScheduleBlock({
+    providerId: params.providerId,
+    organizationId: params.organizationId,
+    actingUserId: null,
+    input: params.input,
+  });
+}
+
+/**
+ * Provider self-service delete - unlike the staff-facing
+ * deleteProviderScheduleBlock (which only scopes by organizationId, since
+ * any staff member with providers.manage may edit any provider's
+ * schedule), this must also verify the block actually belongs to the
+ * requesting provider - otherwise one provider could delete another
+ * provider's availability by guessing a schedule ID.
+ */
+export async function deleteProviderPortalScheduleBlock(params: {
+  scheduleId: string;
+  providerId: string;
+  organizationId: string;
+}) {
+  const admin = createAdminClient();
+  const { data: block, error } = await admin
+    .from("provider_schedules")
+    .select("id")
+    .eq("id", params.scheduleId)
+    .eq("provider_id", params.providerId)
+    .eq("organization_id", params.organizationId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!block) throw new Error("Availability block not found");
+
+  return deleteProviderScheduleBlock({
+    scheduleId: params.scheduleId,
+    organizationId: params.organizationId,
+    actingUserId: null,
+  });
 }

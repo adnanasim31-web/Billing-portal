@@ -3567,21 +3567,86 @@ on subsequent calls (email and/or password, whichever changed) -
 `getProviderPortalAccountStatus` (mirroring the Patient Portal's
 identical function) tells the form which case it's in.
 
-## Dashboard: appointments, claims, credentialing
+## Dashboard: appointments, claims, credentialing, availability
 
-`/provider` is a single page with three tabs (`Tabs`/`TabsContent`, same
-primitive the patient profile page's tabs already use) rather than
-separate routes - the provider-portal equivalent of `PatientTabs`, just
-read-only and scoped to one provider instead of one patient:
+Originally a single `/provider` page with three tabs; reworked (see the
+sidebar section below) into four separate routes so the nav can highlight
+the active section the same way the staff dashboard and Patient Portal
+already do - `/provider` (Appointments), `/provider/claims`,
+`/provider/credentialing`, `/provider/availability`. Each page is still
+read-only except Availability, and scoped to one provider instead of one
+patient:
 
-- **Appointments** - every `appointments` row for this `provider_id`.
-- **Claims** - every `claims` row for this `provider_id`, with the
-  patient's name and remaining balance.
-- **Credentialing** - `provider_credentials` for this provider, reusing
+- **Appointments** (`/provider`, the realm's home page) - every
+  `appointments` row for this `provider_id`.
+- **Claims** (`/provider/claims`) - every `claims` row for this
+  `provider_id`, with the patient's name and remaining balance.
+- **Credentialing** (`/provider/credentialing`) - `provider_credentials`
+  for this provider, reusing
   `CREDENTIAL_TYPE_LABELS`/`CREDENTIAL_STATUS_LABELS`/`CREDENTIAL_STATUS_VARIANT`
   (already exported from the staff credentialing table component) and
   `isExpired`/`isExpiringSoon` from `credentialing-status.ts`, instead of
   redefining any of that.
+- **Availability** (`/provider/availability`) - the one self-service,
+  writable section; see below.
+
+## Self-service availability management
+
+Providers can manage their own `provider_schedules` blocks (day of week,
+start/end time, optional location) directly, the same add/delete UI shape
+as the staff-facing `ScheduleTab` on the provider profile page
+(`ProviderPortalAvailabilityTab` is a near-identical port), grouped by day
+with a delete button per block. The billing office uses these blocks when
+scheduling appointments, so the page's copy says so.
+
+`GET`/`POST /api/provider/schedule` and `DELETE
+/api/provider/schedule/[scheduleId]` resolve the acting provider from the
+session (`getCurrentProviderPortalUser()`) rather than trusting a
+provider ID in the request, and delegate to the existing staff-facing
+`provider-schedule-service.ts` functions - which required two changes:
+
+- `addProviderScheduleBlock`/`deleteProviderScheduleBlock`'s
+  `actingUserId` parameter widened from `string` to `string | null`, the
+  same `recordPatientDocument`-style FK caution as everywhere else a
+  portal account (not a `profiles` row) initiates an action that gets
+  audit-logged or attributed to a user.
+- A new ownership check: `deleteProviderScheduleBlock` alone only scopes
+  by `organizationId`, which is safe for staff (who manage the whole
+  org's schedules) but would let one provider delete another provider's
+  block by guessing its ID if called directly from the portal. The portal
+  route instead calls a new `deleteProviderPortalScheduleBlock`, which
+  first verifies the target block's `provider_id` actually matches the
+  requesting provider before delegating to the underlying delete.
+
+## Sidebar navigation matching the staff dashboard
+
+The dashboard originally had a single slim header (logo, name, sign-out)
+with no side navigation. Reworked to match the staff dashboard's (and
+Patient Portal's) collapsible left sidebar pattern exactly, once there
+were four routes to navigate between instead of one:
+
+- `ProviderPortalSidebar` - same framer-motion width-collapse animation,
+  tooltip-on-collapse, and active-link highlighting (with the same
+  exact-match special case for `/provider` itself, since it's a literal
+  prefix of every other route in the realm) as `PortalSidebar`/the staff
+  sidebar, with `PROVIDER_PORTAL_NAV` (Appointments/Claims/Credentialing/Availability)
+  driving the link list and the provider's display name shown at the
+  bottom instead of "Patient".
+- `ProviderPortalMobileNav` - a `createPortal`-rendered drawer, mirroring
+  `PortalMobileNav` exactly, to escape the header's `backdrop-blur`
+  containing-block clipping bug that a plain in-header drawer would hit.
+- `ProviderPortalUserMenu` - avatar + name + sign-out dropdown; simpler
+  than the Patient Portal's version since there's no provider-portal
+  profile page to link to.
+- `ProviderPortalHeader` - rewritten from the original logo+sign-out bar
+  into a slim top bar (mobile-nav button + page title + user menu),
+  matching `PortalHeader`'s structure so the sidebar has somewhere to
+  sit next to it.
+
+Verified visually with Playwright (desktop 1440x900 and mobile 390x844,
+including the opened mobile drawer) against a temporary preview route,
+removed before committing along with its temporary middleware
+public-route entry.
 
 ## Naming collision caught before it shipped
 
@@ -3613,10 +3678,12 @@ the Patient Portal already ran into.
 
 Full typecheck/lint/240-test suite/build pass (7 new validation tests).
 Verified via `curl`: `/provider/login` returns 200 unauthenticated,
-`/provider` redirects to `/provider/login` unauthenticated, `POST
-/api/provider/auth/login` and `GET /api/providers/[id]/portal-access`
-both return proper 401 JSON rather than a redirect, and the existing
-staff `/login` and `/dashboard` behavior is unchanged.
+`/provider`, `/provider/claims`, `/provider/credentialing`, and
+`/provider/availability` all redirect to `/provider/login`
+unauthenticated, `POST /api/provider/auth/login`, `GET
+/api/providers/[id]/portal-access`, and `GET /api/provider/schedule` all
+return proper 401 JSON rather than a redirect, and the existing staff
+`/login` and `/dashboard` behavior is unchanged.
 
 ---
 
