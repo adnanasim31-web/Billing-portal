@@ -3429,6 +3429,60 @@ Supabase session.
 
 ---
 
+# Patient Portal: Document Access and Profile Self-Service
+
+## Documents
+
+Patients could not view or share files with their provider's billing
+office at all - the closest thing was `patient_documents`, populated
+exclusively by staff on the dashboard's Documents tab. Adds
+`/portal/documents`: a list of every document already on file (insurance
+cards, consent forms, referrals, etc. uploaded by staff), plus an upload
+button so patients can add their own (most commonly a photo of an
+insurance card). Reuses the existing `patient-document-service.ts`
+functions as-is (`listPatientDocuments`, `getSignedDownloadUrl`,
+`buildDocumentStoragePath`, `createSignedUploadUrl`) - they were already
+patient/organization-scoped and needed no changes.
+
+`recordPatientDocument`'s `uploadedBy` param was widened from `string` to
+`string | null`: it feeds `patient_documents.uploaded_by`, which has a
+foreign key to `profiles` (staff accounts) - a patient portal account's
+ID isn't a `profiles` row, so passing it there would violate that FK.
+Patient-initiated uploads now pass `null`, matching the pattern
+`recordPortalPayment` already established for its own audit log call for
+the same reason.
+
+Deliberately out of scope: deleting a document. Distinguishing "staff
+uploaded this, don't let the patient delete it" from "the patient
+uploaded this themselves, they can delete it" isn't reliably possible
+from `uploaded_by` alone (it's `null` either way once you can't reference
+a patient there), so patients can view and add documents but not remove
+any - if something's uploaded in error, uploading a corrected one is the
+only path, same as how many real patient portals handle this.
+
+## Profile self-service
+
+Patients had no way to update their own phone number or address - any
+change meant calling the billing office so staff could edit it from the
+dashboard. Adds `/portal/profile` with a `patientPortalProfileSchema`
+(new, in `patient-portal.ts`) scoped to exactly the fields that are
+safe for a patient to self-manage: mobile/home phone and mailing
+address. Name, date of birth, and email are deliberately excluded from
+what this form can touch - those are the patient's identity as it
+appears on claims and stay staff-managed, changed (if ever) through the
+dashboard where a change of this kind should be a deliberate, logged
+staff action rather than a self-service form field.
+
+## Testing
+
+Full typecheck/lint/233-test suite/build pass (5 new validation tests for
+`patientPortalProfileSchema`), plus a `curl` smoke test confirming the
+new pages redirect cleanly to `/portal/login` and the new API routes
+(`GET`/`PATCH /api/portal/profile`, `GET /api/portal/documents`) return
+proper 401 JSON rather than a redirect when unauthenticated.
+
+---
+
 ## Local development
 
 ```bash

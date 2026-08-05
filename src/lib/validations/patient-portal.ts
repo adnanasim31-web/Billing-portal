@@ -23,3 +23,25 @@ export const patientPortalPaymentSchema = z.object({
   amount: z.number().positive("Enter an amount greater than zero").max(999_999.99),
 });
 export type PatientPortalPaymentInput = z.infer<typeof patientPortalPaymentSchema>;
+
+const optionalPortalPhone = z
+  .string()
+  .max(20)
+  .regex(/^[+()\-.\s0-9]*$/, "Enter a valid phone number")
+  .optional()
+  .or(z.literal(""));
+
+// Deliberately narrow - name, date of birth, and email are the patient's
+// identity as it appears on claims and are staff-managed only. This covers
+// just the contact details a patient would otherwise have to call in to
+// update.
+export const patientPortalProfileSchema = z.object({
+  phoneMobile: optionalPortalPhone,
+  phoneHome: optionalPortalPhone,
+  addressLine1: z.string().max(255).optional().or(z.literal("")),
+  addressLine2: z.string().max(255).optional().or(z.literal("")),
+  city: z.string().max(120).optional().or(z.literal("")),
+  state: z.string().max(2).optional().or(z.literal("")),
+  postalCode: z.string().max(10).optional().or(z.literal("")),
+});
+export type PatientPortalProfileInput = z.infer<typeof patientPortalProfileSchema>;

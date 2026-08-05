@@ -10,6 +10,8 @@ import { cn } from "@/lib/utils";
 const NAV_LINKS = [
   { href: "/portal", label: "Statements" },
   { href: "/portal/payments", label: "Payment history" },
+  { href: "/portal/documents", label: "Documents" },
+  { href: "/portal/profile", label: "Profile" },
 ];
 
 export function PortalHeader({ patientName }: { patientName: string }) {

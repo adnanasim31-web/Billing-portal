@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { recordAuditLog } from "@/lib/services/audit-service";
 import { recomputeClaimTotals } from "@/lib/services/claim-service";
+import type { PatientPortalProfileInput } from "@/lib/validations/patient-portal";
 
 const PORTAL_PAYER_LABEL = "Patient (self-pay, card)";
 const PORTAL_PAYMENT_NOTE = "Paid via the patient portal by card.";
@@ -230,6 +231,52 @@ export async function getPortalClaimById(claimId: string, patientId: string, org
   if (paymentsError) throw paymentsError;
 
   return { claim, lines: lines ?? [], payments: payments ?? [] };
+}
+
+export async function getPortalProfile(patientId: string, organizationId: string) {
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("patients")
+    .select("first_name, last_name, email, phone_mobile, phone_home, address_line1, address_line2, city, state, postal_code")
+    .eq("id", patientId)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+export async function updatePortalProfile(
+  patientId: string,
+  organizationId: string,
+  input: PatientPortalProfileInput
+) {
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("patients")
+    .update({
+      phone_mobile: input.phoneMobile || null,
+      phone_home: input.phoneHome || null,
+      address_line1: input.addressLine1 || null,
+      address_line2: input.addressLine2 || null,
+      city: input.city || null,
+      state: input.state || null,
+      postal_code: input.postalCode || null,
+    })
+    .eq("id", patientId)
+    .eq("organization_id", organizationId)
+    .select("first_name, last_name, email, phone_mobile, phone_home, address_line1, address_line2, city, state, postal_code")
+    .single();
+  if (error) throw error;
+
+  await recordAuditLog({
+    organizationId,
+    userId: null,
+    action: "patient_portal.profile_updated",
+    entityType: "patient",
+    entityId: patientId,
+  });
+
+  return data;
 }
 
 export async function getPortalPaymentHistory(patientId: string, organizationId: string) {
