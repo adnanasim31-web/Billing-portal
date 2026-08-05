@@ -3483,6 +3483,58 @@ proper 401 JSON rather than a redirect when unauthenticated.
 
 ---
 
+# Patient Portal: Sidebar Navigation Matching the Staff Dashboard
+
+The portal's nav had grown to four links (Statements, Payment history,
+Documents, Profile) crammed into a single horizontal header - the same
+spot that started out holding just a logo and a sign-out button. Rebuilt
+the shell to structurally mirror the staff dashboard's own
+`Sidebar`/`Navbar`/`MobileNav`/`UserMenu` shape:
+
+- `PortalSidebar` - a collapsible left sidebar (same `framer-motion`
+  width animation, tooltip-on-collapse behavior, and active-link styling
+  as the staff `Sidebar`), driven by a new `PORTAL_NAV` constant
+  (`src/lib/constants/portal-nav.ts`) instead of `PRIMARY_NAV`. Unlike
+  staff's `Sidebar`, Profile is a top-level, first-position nav item
+  rather than a separate bottom "Settings" section - the portal has
+  nothing else settings-shaped to separate it from.
+- `PortalHeader` - now a slim top bar (title + mobile-nav button + user
+  menu) instead of holding all the nav links itself.
+- `PortalMobileNav` - the `<lg` drawer, ported directly from the staff
+  `MobileNav` including its `createPortal` usage (rendering outside the
+  header's own DOM subtree, since the header's `backdrop-blur` would
+  otherwise clip the `position: fixed` drawer to the header's height
+  instead of the full viewport - the exact bug fixed earlier for the
+  staff dashboard's equivalent drawer).
+- `PortalUserMenu` - an avatar dropdown (name, a Profile shortcut, sign
+  out) mirroring staff's `UserMenu`, minus the staff-only items
+  (Security & 2FA, Organization settings) that don't apply to a
+  single-patient account.
+
+`(authenticated)/layout.tsx` now composes `PortalSidebar` +
+`PortalHeader` in the same flex shell shape as the staff dashboard's own
+layout, instead of a single stacked header.
+
+One structural gotcha specific to the portal: `PORTAL_NAV`'s "Statements"
+entry points at `/portal` itself, which is a literal prefix of every
+other portal route - a naive `pathname.startsWith(item.href)` active-link
+check (fine for staff, where no `PRIMARY_NAV` href is a prefix of
+another) would mark "Statements" active on every single portal page.
+Both `PortalSidebar` and `PortalMobileNav` special-case this with an
+exact-match check for `/portal` specifically.
+
+## Testing
+
+Verified visually, not just by code diff: rendered `PortalSidebar` +
+`PortalHeader` on a temporary preview route (deleted before commit) via
+Playwright screenshots at both desktop and mobile viewports, confirming
+the sidebar's collapse/nav-item styling, the user menu dropdown
+(Profile/Sign out), and the mobile drawer's full-viewport overlay all
+render correctly - not just that the code compiles. Full
+typecheck/lint/233-test suite/build pass.
+
+---
+
 ## Local development
 
 ```bash
