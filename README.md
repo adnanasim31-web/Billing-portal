@@ -3341,6 +3341,52 @@ suite/build pass.
 
 ---
 
+# Patient Portal: Dedicated Hostname + Forgot/Reset Password
+
+## Dedicated hostname
+
+Adds an optional `PATIENT_PORTAL_HOST` env var. When a request's `Host`
+header matches it, `/` is treated as `/portal` for that request only - a
+second domain/alias pointed at this same Vercel project (e.g. an
+additional `*.vercel.app` name added under Project Settings -> Domains)
+takes patients straight to the portal instead of the staff app's root.
+Unauthenticated visitors land on `/portal/login`; authenticated patients
+get a rewrite to `/portal` so the address bar stays at `/`. Any other
+host (the staff domain, other preview URLs) is unaffected.
+
+## Forgot/reset password
+
+The patient portal had a login page but no self-service password
+recovery - a locked-out patient had no path back in except asking the
+billing office to send a new invite. Adds `/portal/forgot-password` and
+`/portal/reset-password`, mirroring the staff `/forgot-password` and
+`/reset-password` flow exactly: `supabase.auth.resetPasswordForEmail`
+with a `redirectTo` of `/portal/reset-password` (instead of the staff
+`/reset-password`), reusing the same `forgotPasswordSchema` /
+`resetPasswordSchema` since neither has realm-specific fields. The
+middleware's portal-public-route list now includes both new routes, with
+`/portal/reset-password` excluded from the "already logged in, bounce
+away" check - the emailed recovery link exchanges itself for a real
+session, and force-redirecting that session away from the reset page
+would make the reset impossible to complete, mirroring the staff side's
+own `pathname !== "/reset-password"` exclusion. A "Forgot password?" link
+was added next to the password field on the portal login form, matching
+the staff login form.
+
+## Testing
+
+Verified via `curl -H "Host: ..."` against a local dev server: the
+patient-portal host redirects `/` to `/portal/login` when unauthenticated
+while a different `Host` header still goes to the staff `/login` as
+before. Also verified unauthenticated `GET` on both new portal pages
+returns 200, `POST /api/portal/auth/forgot-password` returns
+`{"ok":true}` without a redirect, and `POST /api/portal/auth/reset-password`
+without a valid recovery session correctly returns a 401 JSON error
+instead of silently succeeding. Full typecheck/lint/228-test suite/build
+pass.
+
+---
+
 ## Local development
 
 ```bash
@@ -3365,8 +3411,11 @@ npm run dev
    cookie).
 5. In Supabase Auth settings, add your Vercel deployment URL (and
    `http://localhost:3000` for local dev) to the redirect allow-list, since
-   `/api/auth/forgot-password` redirects to `/reset-password` after the
-   emailed link is clicked.
+   `/api/auth/forgot-password` redirects to `/reset-password` and
+   `/api/portal/auth/forgot-password` redirects to `/portal/reset-password`
+   after the emailed link is clicked - if you added a dedicated patient
+   portal domain via `PATIENT_PORTAL_HOST`, add that domain's
+   `/portal/reset-password` URL to the allow-list too.
 
 ## Deploying to Vercel
 
