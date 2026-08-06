@@ -3864,6 +3864,66 @@ manifest.
 
 ---
 
+# Module 21: Claim Adjustments (Write-offs)
+
+Before this, `claim_denials.resolution_status` had a `'written_off'`
+value that did precisely nothing - a denial could be flagged written off
+while the claim's `balance_amount` sat exactly where it was, because
+nothing ever touched a dollar amount. This module makes "write it off"
+an action that actually happens, not just a label.
+
+## Why adjustments are line-scoped, not claim-scoped
+
+`claims.total_adjustment_amount` looks like a plain column you could just
+increment, but it isn't the source of truth - `recomputeClaimTotals()` in
+`claim-service.ts` (already used by payment posting) always **overwrites**
+it with `sum(claim_lines.adjustment_amount)` across the claim's
+procedure lines. Patch `claims.total_adjustment_amount` directly and it
+would get silently clobbered back the next time any line changes or a
+payment posts. So `createClaimAdjustment()`
+(`src/lib/services/claim-adjustment-service.ts`) does the same thing
+`addPaymentAllocation()` already does for payments: increment one
+specific `claim_lines.adjustment_amount`, then call the same
+`recomputeClaimTotals()`. `balance_amount` is a Postgres
+`generated always as (charge - paid - adjustment) stored` column, so it
+recomputes itself the instant `total_adjustment_amount` changes -
+nothing extra to do to keep the AR worklist (which filters
+`balance_amount > 0`) in sync.
+
+A new `claim_adjustments` table (modeled on `ar_notes`/`claim_denials` -
+a small, append-only child table) is the audit trail: who wrote off how
+much, on which line, and why (`write_off` / `contractual` /
+`financial_hardship` / `courtesy` / `correction` / `other`). It's
+deliberately not layered onto `claim_status_history` - that table's
+`to_status` is conceptually (and in the UI) a `ClaimStatus`, and an
+adjustment isn't a status change.
+
+## Where it lives
+
+A new "Adjustments" card on the claim detail page
+(`ClaimAdjustmentsSection`), sitting between Payments and Collections -
+the same position makes sense as the same kind of action: Payments
+reduces the balance with cash, Adjustments reduces it by writing part of
+it off, and Collections is what's left to chase afterward. Posting one
+requires `payments.post` (the same permission payment posting already
+requires, since financially they're the same class of action), and the
+line picker only offers lines that still have a remaining balance -
+`computeLineRemainingBalance()` and `validateAdjustmentAmount()` are
+pure functions (`claim-adjustment-logic.ts`, mirroring
+`payment-reconciliation.ts`'s role) so the "can't adjust more than what's
+left on this line" rule is unit tested directly rather than only
+exercised through the API.
+
+## Testing
+
+Full typecheck/lint/263-test suite/build pass (13 new tests: 7 for the
+pure adjustment-logic functions, 6 for the Zod schema). Verified via a
+placeholder-env production build that `/api/claims/[id]/adjustments`
+compiles and appears in the route manifest at the same lean size as
+every sibling API route.
+
+---
+
 ## Local development
 
 ```bash

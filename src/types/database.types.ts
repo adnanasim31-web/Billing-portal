@@ -49,6 +49,13 @@ export type ClaimStatus =
   | "paid"
   | "appealed"
   | "closed";
+export type ClaimAdjustmentCategory =
+  | "write_off"
+  | "contractual"
+  | "financial_hardship"
+  | "courtesy"
+  | "correction"
+  | "other";
 export type EligibilityServiceType =
   | "general"
   | "specialist"
@@ -1004,6 +1011,49 @@ export interface Database {
           procedure_code: string;
         };
         Update: Partial<Database["public"]["Tables"]["claim_lines"]["Row"]>;
+      };
+      claim_adjustments: {
+        Row: {
+          id: string;
+          organization_id: string;
+          claim_id: string;
+          claim_line_id: string;
+          amount: number;
+          category: ClaimAdjustmentCategory;
+          notes: string | null;
+          created_by: string | null;
+          created_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "claim_adjustments_claim_id_fkey";
+            columns: ["claim_id"];
+            isOneToOne: false;
+            referencedRelation: "claims";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "claim_adjustments_claim_line_id_fkey";
+            columns: ["claim_line_id"];
+            isOneToOne: false;
+            referencedRelation: "claim_lines";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "claim_adjustments_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["claim_adjustments"]["Row"]> & {
+          organization_id: string;
+          claim_id: string;
+          claim_line_id: string;
+          amount: number;
+        };
+        Update: Partial<Database["public"]["Tables"]["claim_adjustments"]["Row"]>;
       };
       claim_status_history: {
         Row: {
