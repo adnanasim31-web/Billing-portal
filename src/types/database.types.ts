@@ -1242,6 +1242,7 @@ export interface Database {
           notes: string | null;
           created_by: string | null;
           updated_by: string | null;
+          expiration_notified_at: string | null;
           created_at: string;
           updated_at: string;
         };

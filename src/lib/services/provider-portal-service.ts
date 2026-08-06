@@ -26,6 +26,7 @@ import type {
   ProviderMessageInput,
 } from "@/lib/validations/provider-messaging";
 import type { ProviderPortalDocumentMetaInput } from "@/lib/validations/provider-portal";
+import { resolveProviderDisplayName } from "@/lib/services/provider-display-name";
 
 export interface ProviderPortalUser {
   id: string;
@@ -33,20 +34,6 @@ export interface ProviderPortalUser {
   providerId: string;
   organizationId: string;
   displayName: string;
-}
-
-function resolveProviderDisplayName(provider: {
-  provider_type: string;
-  first_name: string | null;
-  last_name: string | null;
-  organization_name: string | null;
-  credential_suffix: string | null;
-}): string {
-  if (provider.provider_type === "organization") {
-    return provider.organization_name ?? "Provider";
-  }
-  const name = `${provider.first_name ?? ""} ${provider.last_name ?? ""}`.trim();
-  return provider.credential_suffix ? `${name}, ${provider.credential_suffix}` : name;
 }
 
 /** Resolves the signed-in provider portal account, or null if this session isn't one. */

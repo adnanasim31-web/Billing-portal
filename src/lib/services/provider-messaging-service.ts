@@ -1,5 +1,8 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sendEmail } from "@/lib/email";
+import { renderInviteEmail } from "@/lib/email-templates";
+import { resolveProviderDisplayName } from "@/lib/services/provider-display-name";
 import type { ProviderMessageInput } from "@/lib/validations/provider-messaging";
 
 /** One row per provider that has at least one message - drives the staff-side worklist. */
@@ -51,7 +54,43 @@ export async function postProviderMessageAsStaff(params: {
     .select("*, profiles:sender_profile_id (first_name, last_name)")
     .single();
   if (error) throw error;
+
+  await notifyProviderOfNewMessage(params.providerId, params.organizationId);
+
   return data;
+}
+
+/**
+ * Best-effort - a provider not seeing an email for a new message is a much
+ * smaller problem than a staff member's reply failing to save because the
+ * mailer hiccuped, so this never throws back into the caller.
+ */
+async function notifyProviderOfNewMessage(providerId: string, organizationId: string) {
+  try {
+    const admin = createAdminClient();
+    const { data: account } = await admin
+      .from("provider_portal_accounts")
+      .select("email, providers:provider_id (provider_type, first_name, last_name, organization_name, credential_suffix)")
+      .eq("provider_id", providerId)
+      .eq("organization_id", organizationId)
+      .maybeSingle();
+    if (!account) return;
+
+    const providerName = account.providers ? resolveProviderDisplayName(account.providers) : "there";
+
+    await sendEmail({
+      to: account.email,
+      subject: "New message from your billing office",
+      html: renderInviteEmail({
+        heading: "New message from your billing office",
+        body: `Hi ${providerName}, your billing office sent you a new message. Sign in to the provider portal to read and reply.`,
+        actionLabel: "View message",
+        actionUrl: `${process.env.NEXT_PUBLIC_APP_URL}/provider/messages`,
+      }),
+    });
+  } catch (err) {
+    console.error("[provider-messaging] failed to send new-message notification", err);
+  }
 }
 
 export async function postProviderMessageAsProvider(params: {

@@ -3737,16 +3737,70 @@ claims" is defined as `draft`/`ready`/`submitted` - there's no single
 `ClaimStatus` value that means "pending," so this is a documented
 choice, not a database constraint.
 
+## Notifications
+
+Messaging and credentialing were otherwise silent - a provider only found
+out about a billing reply or an about-to-expire credential by remembering
+to log in and check. Two email notifications close that loop, both
+reusing the existing SMTP mailer (`src/lib/email.ts` + `sendEmail`) and
+its one shared template (`renderInviteEmail`) rather than adding a second
+email-sending path or a new template - the "Invite" name is a holdover
+from what it was first built for, but the function itself is just
+heading/body/actionLabel/actionUrl, generic enough for either invites or
+notifications.
+
+**Billing office replied** - `postProviderMessageAsStaff` (in
+`provider-messaging-service.ts`) sends the notification itself right
+after the insert succeeds, so it fires no matter which caller posts a
+staff reply. It looks up the provider's `provider_portal_accounts.email`
+directly and skips silently if no account exists (nothing to notify -
+they can't sign in either way). The send is wrapped in a try/catch that
+only `console.error`s on failure: a mailer hiccup should never cause the
+reply itself to fail to save.
+
+**Credentials expiring soon** - a wholly new piece of infrastructure,
+since nothing in this codebase runs on a schedule yet. `vercel.json`
+declares a daily Vercel Cron hitting a new
+`/api/cron/provider-credential-expiration` route, protected by a
+`CRON_SECRET` compared against the `Authorization: Bearer` header Vercel
+automatically attaches to cron-triggered requests (anyone else hitting
+the URL gets a 401). The route does a cross-organization sweep of
+`provider_credentials` (a cron job has no single organization to scope
+to), filters with the existing pure `isExpiringSoon()` from
+`credentialing-status.ts` against the same 30-day window already shown
+on the provider portal's overview KPI (so the count a provider sees on
+`/provider` and the reminder they get by email agree with each other),
+groups by provider, and sends one batched email per provider listing
+every credential that's due rather than one email per credential.
+
+A new nullable `expiration_notified_at` column on `provider_credentials`
+stops the daily sweep from re-emailing the same credential every single
+day throughout its whole warning window - a credential is only picked up
+by `listCredentialsNeedingExpirationNotice()` while that column is still
+null, and `markCredentialsNotified()` stamps it once the email actually
+sends (mirroring `sendEmail`'s own "return false, don't throw" contract:
+if SMTP isn't configured, nothing gets marked notified, so the sweep
+retries the next day instead of silently giving up forever).
+`updateCredential()` resets the column back to null whenever
+`expiration_date` actually changes, so a renewal re-arms the reminder for
+the new date rather than staying permanently silenced from the old one.
+
 ## Testing
 
-Full typecheck/lint/247-test suite/build pass (14 new validation tests
-across two new test files plus additions to the existing provider-portal
-suite). Verified via a placeholder-env production build that every new
-route and API endpoint compiles and appears in the route manifest:
-`/provider` (overview), `/provider/appointments`, `/provider/messages`,
-`/provider/documents`, `/api/provider/messages`, `/api/provider/documents`,
+Full typecheck/lint/247-test suite/build pass. Verified the client-bundle
+leak was avoided in the cron route (importing `CREDENTIAL_TYPE_LABELS`
+from the "use client" `credentialing-table.tsx` would have pulled that
+whole component tree into a server route's bundle for the sake of one
+labels object - confirmed via the build's route-size output before and
+after duplicating the small map locally instead: 5.4 kB down to 372 B,
+matching every sibling API route). Verified via a placeholder-env
+production build that every new route and API endpoint compiles and
+appears in the route manifest: `/provider` (overview),
+`/provider/appointments`, `/provider/messages`, `/provider/documents`,
+`/api/provider/messages`, `/api/provider/documents`,
 `/api/provider/documents/upload-url`, `/api/provider/documents/[documentId]`,
-and the staff-side `/api/providers/[id]/messages`.
+`/api/cron/provider-credential-expiration`, and the staff-side
+`/api/providers/[id]/messages`.
 
 ---
 
