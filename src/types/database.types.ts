@@ -56,6 +56,13 @@ export type ClaimAdjustmentCategory =
   | "courtesy"
   | "correction"
   | "other";
+export type PaymentRefundReason =
+  | "overpayment"
+  | "coding_error"
+  | "patient_dispute"
+  | "insurance_recoupment"
+  | "duplicate_payment"
+  | "other";
 export type EligibilityServiceType =
   | "general"
   | "specialist"
@@ -1204,6 +1211,68 @@ export interface Database {
           organization_id: string;
         };
         Update: Partial<Database["public"]["Tables"]["payment_allocations"]["Row"]>;
+      };
+      payment_refunds: {
+        Row: {
+          id: string;
+          organization_id: string;
+          payment_id: string;
+          payment_allocation_id: string;
+          claim_id: string;
+          claim_line_id: string;
+          amount: number;
+          reason: PaymentRefundReason;
+          notes: string | null;
+          stripe_refund_id: string | null;
+          created_by: string | null;
+          created_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "payment_refunds_payment_id_fkey";
+            columns: ["payment_id"];
+            isOneToOne: false;
+            referencedRelation: "payments";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "payment_refunds_payment_allocation_id_fkey";
+            columns: ["payment_allocation_id"];
+            isOneToOne: false;
+            referencedRelation: "payment_allocations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "payment_refunds_claim_id_fkey";
+            columns: ["claim_id"];
+            isOneToOne: false;
+            referencedRelation: "claims";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "payment_refunds_claim_line_id_fkey";
+            columns: ["claim_line_id"];
+            isOneToOne: false;
+            referencedRelation: "claim_lines";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "payment_refunds_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["payment_refunds"]["Row"]> & {
+          organization_id: string;
+          payment_id: string;
+          payment_allocation_id: string;
+          claim_id: string;
+          claim_line_id: string;
+          amount: number;
+        };
+        Update: Partial<Database["public"]["Tables"]["payment_refunds"]["Row"]>;
       };
       claim_denials: {
         Row: {

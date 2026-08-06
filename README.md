@@ -3924,6 +3924,93 @@ every sibling API route.
 
 ---
 
+# Module 22: Refunds
+
+The mirror image of Module 21's write-offs: instead of forgiving part of
+a balance, this reverses money that was already paid. Same underlying
+mechanics, opposite direction.
+
+## Allocation-scoped, same reasoning as claim adjustments
+
+A refund targets one specific `payment_allocations` row, not a whole
+`payments` row - a single payment can allocate across several procedure
+lines with different paid amounts, and it's each line's
+`claim_lines.paid_amount` that actually needs to be decremented.
+`createPaymentRefund()` (`src/lib/services/payment-refund-service.ts`)
+is `addPaymentAllocation()`'s mirror image: instead of incrementing
+`claim_lines.paid_amount`, it decrements it (clamped at zero), then calls
+the same `recomputeClaimTotals()` both payments and adjustments already
+use. `payments`/`payment_allocations` were already documented as an
+intentionally immutable audit trail (no update/delete RLS policy - "a
+correction is a new payment/allocation"), so a new `payment_refunds`
+table is the append-only record of each reversal, never a mutation of
+the original payment.
+
+A `refundableAmount` per allocation (paid amount minus any prior
+refunds against that same allocation) is computed the same way
+`claim_adjustments`' remaining-balance check is - two pure functions in
+`refund-logic.ts` mirroring `claim-adjustment-logic.ts`'s role, so "can't
+refund more than was actually paid" is unit tested directly rather than
+only exercised through the API.
+
+## The Stripe branch
+
+`payments.stripe_payment_intent_id` already existed (Module: Stripe) as
+an idempotency guard for patient-portal card payments - null for
+staff-posted manual/ERA payments, set only when a patient paid by card.
+This is the first thing to actually *read* that column for its intended
+second purpose: when it's set, `createPaymentRefund()` calls
+`stripe.refunds.create()` before writing anything to the database, so a
+"refund" for a card payment is an honest one - the patient's card
+actually gets credited, not just an internal number moving. For a
+manual/ERA payment there's no external gateway to reverse, so that step
+is skipped entirely and the refund is pure bookkeeping. If the Stripe
+call fails, nothing is recorded - the refund genuinely didn't happen.
+
+## Where it lives
+
+A new "Refunds" card on the payment detail page
+(`PaymentRefundSection`), below the existing allocations section -
+same page, since a refund only makes sense in the context of a specific
+payment's allocations. Gated by the same `payments.post` permission
+payment posting and adjustments both already use, reusing this
+codebase's own established precedent rather than minting a new
+`payments.refund` slug.
+
+## Testing
+
+Full typecheck/lint/277-test suite/build pass (14 new tests: 8 for the
+pure refund-logic functions, 6 for the Zod schema). Verified via a
+placeholder-env production build that `/api/payments/[id]/refunds`
+compiles and appears in the route manifest.
+
+---
+
+## Bugfix: middleware redirects were dropping cookies
+
+Every `NextResponse.redirect()`/`.rewrite()` call in
+`src/lib/supabase/middleware.ts` constructed a brand-new response object,
+which silently drops any Set-Cookie headers already staged on the
+original response - most importantly, a stale or invalid refresh-token
+cookie that `supabase.auth.getUser()` tries to clear (or a rotated
+session it tries to write) during that same request. Without copying
+those over, a browser with a bad cookie for the site would keep
+re-sending the exact same bad cookie on every request after being
+redirected, since the redirect response never actually told it to stop.
+This is a documented gotcha of the Supabase SSR + Next.js middleware
+pattern, and matches a real production report precisely: the site
+looped with "too many redirects" in a normal browser with old cookies,
+but loaded fine in an incognito window with none.
+
+Fixed with one small `withCookies()` helper that copies every cookie
+from the in-progress response onto whatever redirect/rewrite response
+is actually returned - applied at all six redirect/rewrite call sites in
+the file. Verified via a placeholder-env production build and a live
+`curl` smoke test sending a deliberately garbage stale cookie against
+every protected route - all resolved in a single redirect, none looped.
+
+---
+
 ## Local development
 
 ```bash

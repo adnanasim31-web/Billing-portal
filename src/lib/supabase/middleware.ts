@@ -20,6 +20,24 @@ const PORTAL_PUBLIC_ROUTES = [
 
 const PROVIDER_PUBLIC_ROUTES = ["/provider/login"];
 
+/**
+ * NextResponse.redirect()/.rewrite() each construct a brand-new response
+ * object, which silently drops any Set-Cookie headers already staged on
+ * `base` - most importantly, a stale/invalid refresh-token cookie that
+ * supabase.auth.getUser() tried to clear (or a rotated session it tried to
+ * write) during this same request. Without copying those over, the browser
+ * keeps re-sending the same bad cookie on every subsequent request, which
+ * can turn what should be a single redirect into an unresolvable loop.
+ * This is a documented gotcha of the Supabase SSR + Next.js middleware
+ * pattern - every redirect/rewrite in this file must go through here.
+ */
+function withCookies<T extends NextResponse>(base: NextResponse, response: T): T {
+  for (const cookie of base.cookies.getAll()) {
+    response.cookies.set(cookie);
+  }
+  return response;
+}
+
 // Optional dedicated hostname for the patient portal (e.g. a second
 // *.vercel.app alias on the same project). When a request's Host header
 // matches this, "/" is treated as "/portal" so patients land straight in
@@ -88,7 +106,7 @@ export async function updateSession(request: NextRequest) {
     if (!user && !isPortalPublicRoute) {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.pathname = "/portal/login";
-      return NextResponse.redirect(redirectUrl);
+      return withCookies(supabaseResponse, NextResponse.redirect(redirectUrl));
     }
 
     // /portal/reset-password needs the recovery-link session to reach the
@@ -108,7 +126,7 @@ export async function updateSession(request: NextRequest) {
         const redirectUrl = request.nextUrl.clone();
         redirectUrl.pathname = "/portal";
         redirectUrl.search = "";
-        return NextResponse.redirect(redirectUrl);
+        return withCookies(supabaseResponse, NextResponse.redirect(redirectUrl));
       }
     }
 
@@ -118,7 +136,7 @@ export async function updateSession(request: NextRequest) {
     if (realPathname !== pathname) {
       const rewriteUrl = request.nextUrl.clone();
       rewriteUrl.pathname = pathname;
-      return NextResponse.rewrite(rewriteUrl);
+      return withCookies(supabaseResponse, NextResponse.rewrite(rewriteUrl));
     }
 
     return supabaseResponse;
@@ -130,7 +148,7 @@ export async function updateSession(request: NextRequest) {
     if (!user && !isProviderPublicRoute) {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.pathname = "/provider/login";
-      return NextResponse.redirect(redirectUrl);
+      return withCookies(supabaseResponse, NextResponse.redirect(redirectUrl));
     }
 
     if (user && isProviderPublicRoute) {
@@ -147,7 +165,7 @@ export async function updateSession(request: NextRequest) {
         const redirectUrl = request.nextUrl.clone();
         redirectUrl.pathname = "/provider";
         redirectUrl.search = "";
-        return NextResponse.redirect(redirectUrl);
+        return withCookies(supabaseResponse, NextResponse.redirect(redirectUrl));
       }
     }
 
@@ -162,7 +180,7 @@ export async function updateSession(request: NextRequest) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/login";
     redirectUrl.searchParams.set("redirectTo", pathname);
-    return NextResponse.redirect(redirectUrl);
+    return withCookies(supabaseResponse, NextResponse.redirect(redirectUrl));
   }
 
   if (user && isAuthRoute) {
@@ -175,7 +193,7 @@ export async function updateSession(request: NextRequest) {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.pathname = "/dashboard";
       redirectUrl.search = "";
-      return NextResponse.redirect(redirectUrl);
+      return withCookies(supabaseResponse, NextResponse.redirect(redirectUrl));
     }
   }
 

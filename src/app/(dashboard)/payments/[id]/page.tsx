@@ -3,10 +3,12 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentUser, hasPermission } from "@/lib/services/current-user-service";
 import { getPaymentById } from "@/lib/services/payment-service";
+import { listRefundsForPayment } from "@/lib/services/payment-refund-service";
 import { PERMISSIONS } from "@/lib/constants/permissions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PAYMENT_METHOD_LABELS } from "@/components/payments/payments-table";
 import { PaymentAllocationSection } from "@/components/payments/payment-allocation-section";
+import { PaymentRefundSection } from "@/components/payments/payment-refund-section";
 
 export const metadata: Metadata = { title: "Payment" };
 
@@ -29,11 +31,22 @@ export default async function PaymentDetailPage({ params }: { params: Promise<{ 
   if (!hasPermission(user, PERMISSIONS.PAYMENTS_VIEW)) redirect("/dashboard");
 
   const { id } = await params;
-  const detail = await getPaymentById(id, user.organizationId);
+  const [detail, refunds] = await Promise.all([
+    getPaymentById(id, user.organizationId),
+    listRefundsForPayment(id, user.organizationId),
+  ]);
   if (!detail) notFound();
 
   const { payment, lines, allocations, patient } = detail;
   const canPost = hasPermission(user, PERMISSIONS.PAYMENTS_POST);
+
+  const refundedByAllocation = new Map<string, number>();
+  for (const refund of refunds) {
+    refundedByAllocation.set(
+      refund.payment_allocation_id,
+      (refundedByAllocation.get(refund.payment_allocation_id) ?? 0) + Number(refund.amount)
+    );
+  }
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -102,6 +115,28 @@ export default async function PaymentDetailPage({ params }: { params: Promise<{ 
           createdAt: a.created_at,
         }))}
         canPost={canPost}
+      />
+
+      <PaymentRefundSection
+        paymentId={payment.id}
+        allocations={allocations.map((a) => ({
+          id: a.id,
+          lineNumber: a.claim_lines?.line_number ?? 0,
+          procedureCode: a.claim_lines?.procedure_code ?? "",
+          refundableAmount: Math.max(0, Number(a.paid_amount) - (refundedByAllocation.get(a.id) ?? 0)),
+        }))}
+        refunds={refunds.map((r) => ({
+          id: r.id,
+          lineNumber: r.claim_lines?.line_number ?? 0,
+          procedureCode: r.claim_lines?.procedure_code ?? "",
+          amount: Number(r.amount),
+          reason: r.reason,
+          notes: r.notes,
+          createdByName: r.profiles ? `${r.profiles.first_name} ${r.profiles.last_name}` : "Unknown",
+          createdAt: r.created_at,
+          stripeRefundId: r.stripe_refund_id,
+        }))}
+        canManage={canPost}
       />
     </div>
   );
