@@ -27,7 +27,7 @@ export function Sidebar({ organization }: { organization: OrganizationSummary | 
     <motion.aside
       animate={{ width: collapsed ? 76 : 264 }}
       transition={{ duration: 0.2, ease: "easeInOut" }}
-      className="sticky top-0 hidden h-screen shrink-0 flex-col overflow-hidden bg-sidebar text-sidebar-foreground lg:flex"
+      className="sticky top-0 hidden h-screen shrink-0 flex-col overflow-hidden bg-sidebar text-sidebar-foreground lg:flex print:hidden"
     >
       <div className="flex h-16 items-center gap-2.5 px-5">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">

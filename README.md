@@ -3804,6 +3804,66 @@ appears in the route manifest: `/provider` (overview),
 
 ---
 
+# Module 20: Patient Statements
+
+Staff can now print (or print-to-PDF) a real statement for a patient - the
+first "generate a document" feature on the staff side of the app, closing
+one of the biggest gaps from the feature-checklist audit ("Patient
+statements: MISSING - no statement generation/template").
+
+## Reused the existing receipt pattern instead of adding a PDF library
+
+The patient portal already had a "downloadable receipt" for a single
+payment (`portal/payments/[id]/page.tsx`) - it turns out that's not a
+server-generated PDF file at all, it's a print-styled HTML page with a
+button that calls `window.print()`, using Tailwind's `print:` variants
+to hide the app chrome and let the browser's own print-to-PDF handle the
+rest. That's a genuinely good pattern (no server-side PDF rendering, no
+new dependency, and it looks identical whether printed or saved as a
+PDF), so the new patient statement follows it exactly rather than
+introducing a PDF library.
+
+Two small pieces were shared rather than duplicated a second time:
+`PortalReceiptPrintButton` was generalized into `PrintButton`
+(`src/components/shared/print-button.tsx` - it never had any
+portal-specific logic in the first place, just a `window.print()` call),
+and the address-formatting helper duplicated in the receipt page was
+extracted into `formatAddressLines()` in `src/lib/utils.ts`.
+
+## A gap that only showed up building this: the staff dashboard chrome had no print styles
+
+The receipt page could get away with `print:hidden` on just its own
+back-link/button row because the *patient portal's* header and sidebar
+already had `print:hidden` on them from when that layout was originally
+built. The *staff* dashboard's `Sidebar` and `Navbar` never did - nobody
+had tried to print anything from inside `(dashboard)` before. Printing
+the new statement page without this would print the sidebar and top bar
+on every page too. Fixed once, at the shell level
+(`src/components/layout/sidebar.tsx`, `src/components/layout/navbar.tsx`),
+so any future print-styled page under `(dashboard)/` gets this for free.
+
+## What's on the statement
+
+`getPatientStatementData()` (`src/lib/services/patient-statement-service.ts`)
+pulls the patient record, every claim for that patient
+(`listClaimsForPatient`, already used elsewhere), and the organization's
+letterhead info (name/address/phone/billing email) in parallel. The page
+(`/patients/[id]/statement`, linked from a new "Statement" button on
+`PatientHeader`) renders one row per claim - service date, claim number,
+provider, status badge, charged/paid/balance - and a totals block at the
+bottom. `computeStatementTotals()` is a pure reduce over the claims
+(mirroring the same shape as `ar-service.ts`'s aging totals), kept
+separate from the DB-fetching function so it's cheap to unit test.
+
+## Testing
+
+Full typecheck/lint/250-test suite/build pass (3 new tests for
+`computeStatementTotals`). Verified via a placeholder-env production
+build that `/patients/[id]/statement` compiles and appears in the route
+manifest.
+
+---
+
 ## Local development
 
 ```bash

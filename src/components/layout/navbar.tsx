@@ -27,7 +27,7 @@ export function Navbar({ user, organization }: { user: CurrentUser; organization
   const title = resolveTitle(pathname);
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-4 border-b border-border bg-background/80 px-4 backdrop-blur sm:px-6">
+    <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-4 border-b border-border bg-background/80 px-4 backdrop-blur sm:px-6 print:hidden">
       <div className="flex min-w-0 items-center gap-2">
         <MobileNav organization={organization} />
         <h1 className="truncate text-lg font-semibold tracking-tight">{title}</h1>
