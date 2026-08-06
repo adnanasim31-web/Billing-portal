@@ -3986,6 +3986,31 @@ compiles and appears in the route manifest.
 
 ---
 
+## Bugfix: middleware redirects were dropping cookies
+
+Every `NextResponse.redirect()`/`.rewrite()` call in
+`src/lib/supabase/middleware.ts` constructed a brand-new response object,
+which silently drops any Set-Cookie headers already staged on the
+original response - most importantly, a stale or invalid refresh-token
+cookie that `supabase.auth.getUser()` tries to clear (or a rotated
+session it tries to write) during that same request. Without copying
+those over, a browser with a bad cookie for the site would keep
+re-sending the exact same bad cookie on every request after being
+redirected, since the redirect response never actually told it to stop.
+This is a documented gotcha of the Supabase SSR + Next.js middleware
+pattern, and matches a real production report precisely: the site
+looped with "too many redirects" in a normal browser with old cookies,
+but loaded fine in an incognito window with none.
+
+Fixed with one small `withCookies()` helper that copies every cookie
+from the in-progress response onto whatever redirect/rewrite response
+is actually returned - applied at all six redirect/rewrite call sites in
+the file. Verified via a placeholder-env production build and a live
+`curl` smoke test sending a deliberately garbage stale cookie against
+every protected route - all resolved in a single redirect, none looped.
+
+---
+
 ## Local development
 
 ```bash
