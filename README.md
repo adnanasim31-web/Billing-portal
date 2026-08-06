@@ -3429,6 +3429,501 @@ Supabase session.
 
 ---
 
+# Patient Portal: Document Access and Profile Self-Service
+
+## Documents
+
+Patients could not view or share files with their provider's billing
+office at all - the closest thing was `patient_documents`, populated
+exclusively by staff on the dashboard's Documents tab. Adds
+`/portal/documents`: a list of every document already on file (insurance
+cards, consent forms, referrals, etc. uploaded by staff), plus an upload
+button so patients can add their own (most commonly a photo of an
+insurance card). Reuses the existing `patient-document-service.ts`
+functions as-is (`listPatientDocuments`, `getSignedDownloadUrl`,
+`buildDocumentStoragePath`, `createSignedUploadUrl`) - they were already
+patient/organization-scoped and needed no changes.
+
+`recordPatientDocument`'s `uploadedBy` param was widened from `string` to
+`string | null`: it feeds `patient_documents.uploaded_by`, which has a
+foreign key to `profiles` (staff accounts) - a patient portal account's
+ID isn't a `profiles` row, so passing it there would violate that FK.
+Patient-initiated uploads now pass `null`, matching the pattern
+`recordPortalPayment` already established for its own audit log call for
+the same reason.
+
+Deliberately out of scope: deleting a document. Distinguishing "staff
+uploaded this, don't let the patient delete it" from "the patient
+uploaded this themselves, they can delete it" isn't reliably possible
+from `uploaded_by` alone (it's `null` either way once you can't reference
+a patient there), so patients can view and add documents but not remove
+any - if something's uploaded in error, uploading a corrected one is the
+only path, same as how many real patient portals handle this.
+
+## Profile self-service
+
+Patients had no way to update their own phone number or address - any
+change meant calling the billing office so staff could edit it from the
+dashboard. Adds `/portal/profile` with a `patientPortalProfileSchema`
+(new, in `patient-portal.ts`) scoped to exactly the fields that are
+safe for a patient to self-manage: mobile/home phone and mailing
+address. Name, date of birth, and email are deliberately excluded from
+what this form can touch - those are the patient's identity as it
+appears on claims and stay staff-managed, changed (if ever) through the
+dashboard where a change of this kind should be a deliberate, logged
+staff action rather than a self-service form field.
+
+## Testing
+
+Full typecheck/lint/233-test suite/build pass (5 new validation tests for
+`patientPortalProfileSchema`), plus a `curl` smoke test confirming the
+new pages redirect cleanly to `/portal/login` and the new API routes
+(`GET`/`PATCH /api/portal/profile`, `GET /api/portal/documents`) return
+proper 401 JSON rather than a redirect when unauthenticated.
+
+---
+
+# Patient Portal: Sidebar Navigation Matching the Staff Dashboard
+
+The portal's nav had grown to four links (Statements, Payment history,
+Documents, Profile) crammed into a single horizontal header - the same
+spot that started out holding just a logo and a sign-out button. Rebuilt
+the shell to structurally mirror the staff dashboard's own
+`Sidebar`/`Navbar`/`MobileNav`/`UserMenu` shape:
+
+- `PortalSidebar` - a collapsible left sidebar (same `framer-motion`
+  width animation, tooltip-on-collapse behavior, and active-link styling
+  as the staff `Sidebar`), driven by a new `PORTAL_NAV` constant
+  (`src/lib/constants/portal-nav.ts`) instead of `PRIMARY_NAV`. Unlike
+  staff's `Sidebar`, Profile is a top-level, first-position nav item
+  rather than a separate bottom "Settings" section - the portal has
+  nothing else settings-shaped to separate it from.
+- `PortalHeader` - now a slim top bar (title + mobile-nav button + user
+  menu) instead of holding all the nav links itself.
+- `PortalMobileNav` - the `<lg` drawer, ported directly from the staff
+  `MobileNav` including its `createPortal` usage (rendering outside the
+  header's own DOM subtree, since the header's `backdrop-blur` would
+  otherwise clip the `position: fixed` drawer to the header's height
+  instead of the full viewport - the exact bug fixed earlier for the
+  staff dashboard's equivalent drawer).
+- `PortalUserMenu` - an avatar dropdown (name, a Profile shortcut, sign
+  out) mirroring staff's `UserMenu`, minus the staff-only items
+  (Security & 2FA, Organization settings) that don't apply to a
+  single-patient account.
+
+`(authenticated)/layout.tsx` now composes `PortalSidebar` +
+`PortalHeader` in the same flex shell shape as the staff dashboard's own
+layout, instead of a single stacked header.
+
+One structural gotcha specific to the portal: `PORTAL_NAV`'s "Statements"
+entry points at `/portal` itself, which is a literal prefix of every
+other portal route - a naive `pathname.startsWith(item.href)` active-link
+check (fine for staff, where no `PRIMARY_NAV` href is a prefix of
+another) would mark "Statements" active on every single portal page.
+Both `PortalSidebar` and `PortalMobileNav` special-case this with an
+exact-match check for `/portal` specifically.
+
+## Testing
+
+Verified visually, not just by code diff: rendered `PortalSidebar` +
+`PortalHeader` on a temporary preview route (deleted before commit) via
+Playwright screenshots at both desktop and mobile viewports, confirming
+the sidebar's collapse/nav-item styling, the user menu dropdown
+(Profile/Sign out), and the mobile drawer's full-viewport overlay all
+render correctly - not just that the code compiles. Full
+typecheck/lint/233-test suite/build pass.
+
+---
+
+# Module 19: Provider Portal
+
+A third external, non-staff login realm - alongside staff (`profiles`)
+and the Patient Portal (`patient_portal_accounts`) - so a rendering
+provider can sign in separately to see their own appointment schedule,
+claims, and credentialing status. `provider_portal_accounts` links an
+`auth.users` row to exactly one `providers` row, the same "no roles or
+permissions of its own, access scoped by which single record this
+account belongs to" shape as the Patient Portal.
+
+## Credentials: set directly by staff, not an emailed invite
+
+Unlike the Patient Portal's invite-link flow, a provider's portal email
+and password are set directly on the **Add Provider** / **Edit
+Provider** form (`ProviderPortalAccessForm`, rendered inside
+`ProviderForm`) - staff type in both fields and the account is active
+immediately, no email step, no activation link. This means staff end up
+knowing the provider's password; the form's helper text says so
+explicitly ("share it with them directly") so nobody's under the
+illusion this is anonymous. Leaving both fields blank when adding or
+editing a provider skips portal setup entirely; leaving just the
+password blank on an existing account means "keep the current
+password," letting staff change only the login email if needed.
+
+`recordPatientDocument`-style FK caution applied again here:
+`setProviderPortalCredentials` in `provider-portal-service.ts` creates
+the `auth.users` row via `admin.auth.admin.createUser` on first setup
+(email + password required), or calls `admin.auth.admin.updateUserById`
+on subsequent calls (email and/or password, whichever changed) -
+`getProviderPortalAccountStatus` (mirroring the Patient Portal's
+identical function) tells the form which case it's in.
+
+## Dashboard: appointments, claims, credentialing, availability
+
+Originally a single `/provider` page with three tabs; reworked (see the
+sidebar section below) into four separate routes so the nav can highlight
+the active section the same way the staff dashboard and Patient Portal
+already do - `/provider` (Appointments), `/provider/claims`,
+`/provider/credentialing`, `/provider/availability`. Each page is still
+read-only except Availability, and scoped to one provider instead of one
+patient:
+
+- **Appointments** (`/provider`, the realm's home page) - every
+  `appointments` row for this `provider_id`.
+- **Claims** (`/provider/claims`) - every `claims` row for this
+  `provider_id`, with the patient's name and remaining balance.
+- **Credentialing** (`/provider/credentialing`) - `provider_credentials`
+  for this provider, reusing
+  `CREDENTIAL_TYPE_LABELS`/`CREDENTIAL_STATUS_LABELS`/`CREDENTIAL_STATUS_VARIANT`
+  (already exported from the staff credentialing table component) and
+  `isExpired`/`isExpiringSoon` from `credentialing-status.ts`, instead of
+  redefining any of that.
+- **Availability** (`/provider/availability`) - the one self-service,
+  writable section; see below.
+
+## Self-service availability management
+
+Providers can manage their own `provider_schedules` blocks (day of week,
+start/end time, optional location) directly, the same add/delete UI shape
+as the staff-facing `ScheduleTab` on the provider profile page
+(`ProviderPortalAvailabilityTab` is a near-identical port), grouped by day
+with a delete button per block. The billing office uses these blocks when
+scheduling appointments, so the page's copy says so.
+
+`GET`/`POST /api/provider/schedule` and `DELETE
+/api/provider/schedule/[scheduleId]` resolve the acting provider from the
+session (`getCurrentProviderPortalUser()`) rather than trusting a
+provider ID in the request, and delegate to the existing staff-facing
+`provider-schedule-service.ts` functions - which required two changes:
+
+- `addProviderScheduleBlock`/`deleteProviderScheduleBlock`'s
+  `actingUserId` parameter widened from `string` to `string | null`, the
+  same `recordPatientDocument`-style FK caution as everywhere else a
+  portal account (not a `profiles` row) initiates an action that gets
+  audit-logged or attributed to a user.
+- A new ownership check: `deleteProviderScheduleBlock` alone only scopes
+  by `organizationId`, which is safe for staff (who manage the whole
+  org's schedules) but would let one provider delete another provider's
+  block by guessing its ID if called directly from the portal. The portal
+  route instead calls a new `deleteProviderPortalScheduleBlock`, which
+  first verifies the target block's `provider_id` actually matches the
+  requesting provider before delegating to the underlying delete.
+
+## Sidebar navigation matching the staff dashboard
+
+The dashboard originally had a single slim header (logo, name, sign-out)
+with no side navigation. Reworked to match the staff dashboard's (and
+Patient Portal's) collapsible left sidebar pattern exactly, once there
+were four routes to navigate between instead of one:
+
+- `ProviderPortalSidebar` - same framer-motion width-collapse animation,
+  tooltip-on-collapse, and active-link highlighting (with the same
+  exact-match special case for `/provider` itself, since it's a literal
+  prefix of every other route in the realm) as `PortalSidebar`/the staff
+  sidebar, with `PROVIDER_PORTAL_NAV` (Appointments/Claims/Credentialing/Availability)
+  driving the link list and the provider's display name shown at the
+  bottom instead of "Patient".
+- `ProviderPortalMobileNav` - a `createPortal`-rendered drawer, mirroring
+  `PortalMobileNav` exactly, to escape the header's `backdrop-blur`
+  containing-block clipping bug that a plain in-header drawer would hit.
+- `ProviderPortalUserMenu` - avatar + name + sign-out dropdown; simpler
+  than the Patient Portal's version since there's no provider-portal
+  profile page to link to.
+- `ProviderPortalHeader` - rewritten from the original logo+sign-out bar
+  into a slim top bar (mobile-nav button + page title + user menu),
+  matching `PortalHeader`'s structure so the sidebar has somewhere to
+  sit next to it.
+
+Verified visually with Playwright (desktop 1440x900 and mobile 390x844,
+including the opened mobile drawer) against a temporary preview route,
+removed before committing along with its temporary middleware
+public-route entry.
+
+## Naming collision caught before it shipped
+
+The staff side already has `src/components/providers/provider-header.tsx`,
+`provider-claims-tab.tsx`, and `provider-credentialing-tab.tsx` (plural
+`providers/` directory, for the staff-facing provider profile page). The
+first pass at this module put the new portal-facing components in a
+sibling `provider/` (singular) directory with the *same file names and
+exported component names* - `ProviderHeader`, `ProviderClaimsTab`,
+`ProviderCredentialingTab` would have existed twice, in different
+modules, meaning no compiler error but a real landmine for anyone
+searching the codebase or `grep`-ing for one of those names. Renamed the
+whole portal-facing set into `src/components/provider-portal/` with a
+`ProviderPortal*` prefix on every export - mirroring exactly why the
+Patient Portal's own components are prefixed `Portal*` rather than
+`Patient*`, for the identical reason (staff already owns `Patient*`).
+
+## Middleware: a third realm
+
+Added `/provider/*` as a third branch in `updateSession()` alongside
+`/portal/*`, with its own `PROVIDER_PUBLIC_ROUTES` (`/provider/login`
+only - no invite/forgot-password routes exist for this realm) and the
+same cross-realm guard pattern: a staff member wandering onto
+`/provider/login` isn't force-redirected unless they actually have a
+`provider_portal_accounts` row, preventing the redirect-loop class of bug
+the Patient Portal already ran into.
+
+## Messaging with the billing office
+
+Providers can message the billing office directly instead of claims and
+credentialing being read-only dead ends. Deliberately **not** built on
+Module 15's `message_channels`/`messages` tables - those model an
+org-wide public bulletin board (any staff member with `messaging.use`
+sees every channel) with `messages.author_id` hard-FK'd to `profiles(id)`.
+Neither property fits: a provider's conversation with billing must stay
+private to that provider, and the sender is often a
+`provider_portal_accounts` row, which isn't a `profiles` row and would
+violate that FK on insert.
+
+Instead, a new `provider_messages` table models one flat, implicit
+thread per provider - every row for a given `provider_id` *is* that
+provider's one conversation, ordered by `created_at`, no separate
+threads/participants table needed since there's exactly one thread per
+provider by design. A `sender_type` discriminator (`'provider' |
+'staff'`) plus a nullable `sender_profile_id`/`sender_provider_account_id`
+pair (with a check constraint enforcing exactly one is set for each type)
+lets either side post without an FK violation. The provider side posts
+from `/provider/messages` (`ProviderPortalMessagesTab`); the staff side
+replies from a new **Messages** tab on the staff-facing provider profile
+page (`ProviderMessagesTab`, gated to reply on `providers.manage`,
+reusing the same `providerMessageSchema` and `provider-messaging-service.ts`
+functions both realms share).
+
+## Documents
+
+Reuses Module 14's polymorphic `documents` table (`entity_type:
+"provider"`, `entity_id: providerId`, `category: "provider_credential"`)
+rather than a new table - it was already designed to be taggable to a
+provider record, and the existing staff `/documents` page already lists
+it (filterable by the `provider_credential` category), so provider
+uploads are visible to staff with no additional UI work. `listDocuments`
+gained optional `entityType`/`entityId` filters (backward compatible -
+existing staff callers are unaffected) so
+`getProviderPortalDocuments` can scope to just this provider's uploads.
+`createDocument`/`deleteDocument`'s `uploadedBy`/`actingUserId` params
+were widened to `string | null`, the same FK caution applied throughout
+this codebase for portal-initiated writes (a provider portal account
+isn't a `profiles` row). Deletes verify the target document's
+`entity_id` actually matches the requesting provider before delegating
+to the shared `deleteDocument` - the same ownership-check pattern used
+for `deleteProviderPortalScheduleBlock` - since the underlying function
+only scopes by `organizationId`. Uploads reuse the existing
+`organization-documents` Storage bucket and signed-upload-URL flow
+directly, no new bucket needed.
+
+## Home overview page
+
+`/provider` was the appointments list; it's now a KPI overview (today's
+appointment count and next appointment, pending claims count, credentials
+expiring within 30 days, plus a shortcut into Messages), and the
+appointments list moved to its own `/provider/appointments` route so
+every section has an equivalent top-level nav entry. The KPIs are
+purpose-built, lighter queries (`getProviderPortalOverviewStats`) rather
+than reusing `getProviderPortalAppointments`/`getProviderPortalClaims`/
+`getProviderPortalCredentials`, which each pull up to 100 unfiltered
+rows and would be wasteful (and semantically wrong) for a count. "Pending
+claims" is defined as `draft`/`ready`/`submitted` - there's no single
+`ClaimStatus` value that means "pending," so this is a documented
+choice, not a database constraint.
+
+## Notifications
+
+Messaging and credentialing were otherwise silent - a provider only found
+out about a billing reply or an about-to-expire credential by remembering
+to log in and check. Two email notifications close that loop, both
+reusing the existing SMTP mailer (`src/lib/email.ts` + `sendEmail`) and
+its one shared template (`renderInviteEmail`) rather than adding a second
+email-sending path or a new template - the "Invite" name is a holdover
+from what it was first built for, but the function itself is just
+heading/body/actionLabel/actionUrl, generic enough for either invites or
+notifications.
+
+**Billing office replied** - `postProviderMessageAsStaff` (in
+`provider-messaging-service.ts`) sends the notification itself right
+after the insert succeeds, so it fires no matter which caller posts a
+staff reply. It looks up the provider's `provider_portal_accounts.email`
+directly and skips silently if no account exists (nothing to notify -
+they can't sign in either way). The send is wrapped in a try/catch that
+only `console.error`s on failure: a mailer hiccup should never cause the
+reply itself to fail to save.
+
+**Credentials expiring soon** - a wholly new piece of infrastructure,
+since nothing in this codebase runs on a schedule yet. `vercel.json`
+declares a daily Vercel Cron hitting a new
+`/api/cron/provider-credential-expiration` route, protected by a
+`CRON_SECRET` compared against the `Authorization: Bearer` header Vercel
+automatically attaches to cron-triggered requests (anyone else hitting
+the URL gets a 401). The route does a cross-organization sweep of
+`provider_credentials` (a cron job has no single organization to scope
+to), filters with the existing pure `isExpiringSoon()` from
+`credentialing-status.ts` against the same 30-day window already shown
+on the provider portal's overview KPI (so the count a provider sees on
+`/provider` and the reminder they get by email agree with each other),
+groups by provider, and sends one batched email per provider listing
+every credential that's due rather than one email per credential.
+
+A new nullable `expiration_notified_at` column on `provider_credentials`
+stops the daily sweep from re-emailing the same credential every single
+day throughout its whole warning window - a credential is only picked up
+by `listCredentialsNeedingExpirationNotice()` while that column is still
+null, and `markCredentialsNotified()` stamps it once the email actually
+sends (mirroring `sendEmail`'s own "return false, don't throw" contract:
+if SMTP isn't configured, nothing gets marked notified, so the sweep
+retries the next day instead of silently giving up forever).
+`updateCredential()` resets the column back to null whenever
+`expiration_date` actually changes, so a renewal re-arms the reminder for
+the new date rather than staying permanently silenced from the old one.
+
+## Testing
+
+Full typecheck/lint/247-test suite/build pass. Verified the client-bundle
+leak was avoided in the cron route (importing `CREDENTIAL_TYPE_LABELS`
+from the "use client" `credentialing-table.tsx` would have pulled that
+whole component tree into a server route's bundle for the sake of one
+labels object - confirmed via the build's route-size output before and
+after duplicating the small map locally instead: 5.4 kB down to 372 B,
+matching every sibling API route). Verified via a placeholder-env
+production build that every new route and API endpoint compiles and
+appears in the route manifest: `/provider` (overview),
+`/provider/appointments`, `/provider/messages`, `/provider/documents`,
+`/api/provider/messages`, `/api/provider/documents`,
+`/api/provider/documents/upload-url`, `/api/provider/documents/[documentId]`,
+`/api/cron/provider-credential-expiration`, and the staff-side
+`/api/providers/[id]/messages`.
+
+---
+
+# Module 20: Patient Statements
+
+Staff can now print (or print-to-PDF) a real statement for a patient - the
+first "generate a document" feature on the staff side of the app, closing
+one of the biggest gaps from the feature-checklist audit ("Patient
+statements: MISSING - no statement generation/template").
+
+## Reused the existing receipt pattern instead of adding a PDF library
+
+The patient portal already had a "downloadable receipt" for a single
+payment (`portal/payments/[id]/page.tsx`) - it turns out that's not a
+server-generated PDF file at all, it's a print-styled HTML page with a
+button that calls `window.print()`, using Tailwind's `print:` variants
+to hide the app chrome and let the browser's own print-to-PDF handle the
+rest. That's a genuinely good pattern (no server-side PDF rendering, no
+new dependency, and it looks identical whether printed or saved as a
+PDF), so the new patient statement follows it exactly rather than
+introducing a PDF library.
+
+Two small pieces were shared rather than duplicated a second time:
+`PortalReceiptPrintButton` was generalized into `PrintButton`
+(`src/components/shared/print-button.tsx` - it never had any
+portal-specific logic in the first place, just a `window.print()` call),
+and the address-formatting helper duplicated in the receipt page was
+extracted into `formatAddressLines()` in `src/lib/utils.ts`.
+
+## A gap that only showed up building this: the staff dashboard chrome had no print styles
+
+The receipt page could get away with `print:hidden` on just its own
+back-link/button row because the *patient portal's* header and sidebar
+already had `print:hidden` on them from when that layout was originally
+built. The *staff* dashboard's `Sidebar` and `Navbar` never did - nobody
+had tried to print anything from inside `(dashboard)` before. Printing
+the new statement page without this would print the sidebar and top bar
+on every page too. Fixed once, at the shell level
+(`src/components/layout/sidebar.tsx`, `src/components/layout/navbar.tsx`),
+so any future print-styled page under `(dashboard)/` gets this for free.
+
+## What's on the statement
+
+`getPatientStatementData()` (`src/lib/services/patient-statement-service.ts`)
+pulls the patient record, every claim for that patient
+(`listClaimsForPatient`, already used elsewhere), and the organization's
+letterhead info (name/address/phone/billing email) in parallel. The page
+(`/patients/[id]/statement`, linked from a new "Statement" button on
+`PatientHeader`) renders one row per claim - service date, claim number,
+provider, status badge, charged/paid/balance - and a totals block at the
+bottom. `computeStatementTotals()` is a pure reduce over the claims
+(mirroring the same shape as `ar-service.ts`'s aging totals), kept
+separate from the DB-fetching function so it's cheap to unit test.
+
+## Testing
+
+Full typecheck/lint/250-test suite/build pass (3 new tests for
+`computeStatementTotals`). Verified via a placeholder-env production
+build that `/patients/[id]/statement` compiles and appears in the route
+manifest.
+
+---
+
+# Module 21: Claim Adjustments (Write-offs)
+
+Before this, `claim_denials.resolution_status` had a `'written_off'`
+value that did precisely nothing - a denial could be flagged written off
+while the claim's `balance_amount` sat exactly where it was, because
+nothing ever touched a dollar amount. This module makes "write it off"
+an action that actually happens, not just a label.
+
+## Why adjustments are line-scoped, not claim-scoped
+
+`claims.total_adjustment_amount` looks like a plain column you could just
+increment, but it isn't the source of truth - `recomputeClaimTotals()` in
+`claim-service.ts` (already used by payment posting) always **overwrites**
+it with `sum(claim_lines.adjustment_amount)` across the claim's
+procedure lines. Patch `claims.total_adjustment_amount` directly and it
+would get silently clobbered back the next time any line changes or a
+payment posts. So `createClaimAdjustment()`
+(`src/lib/services/claim-adjustment-service.ts`) does the same thing
+`addPaymentAllocation()` already does for payments: increment one
+specific `claim_lines.adjustment_amount`, then call the same
+`recomputeClaimTotals()`. `balance_amount` is a Postgres
+`generated always as (charge - paid - adjustment) stored` column, so it
+recomputes itself the instant `total_adjustment_amount` changes -
+nothing extra to do to keep the AR worklist (which filters
+`balance_amount > 0`) in sync.
+
+A new `claim_adjustments` table (modeled on `ar_notes`/`claim_denials` -
+a small, append-only child table) is the audit trail: who wrote off how
+much, on which line, and why (`write_off` / `contractual` /
+`financial_hardship` / `courtesy` / `correction` / `other`). It's
+deliberately not layered onto `claim_status_history` - that table's
+`to_status` is conceptually (and in the UI) a `ClaimStatus`, and an
+adjustment isn't a status change.
+
+## Where it lives
+
+A new "Adjustments" card on the claim detail page
+(`ClaimAdjustmentsSection`), sitting between Payments and Collections -
+the same position makes sense as the same kind of action: Payments
+reduces the balance with cash, Adjustments reduces it by writing part of
+it off, and Collections is what's left to chase afterward. Posting one
+requires `payments.post` (the same permission payment posting already
+requires, since financially they're the same class of action), and the
+line picker only offers lines that still have a remaining balance -
+`computeLineRemainingBalance()` and `validateAdjustmentAmount()` are
+pure functions (`claim-adjustment-logic.ts`, mirroring
+`payment-reconciliation.ts`'s role) so the "can't adjust more than what's
+left on this line" rule is unit tested directly rather than only
+exercised through the API.
+
+## Testing
+
+Full typecheck/lint/263-test suite/build pass (13 new tests: 7 for the
+pure adjustment-logic functions, 6 for the Zod schema). Verified via a
+placeholder-env production build that `/api/claims/[id]/adjustments`
+compiles and appears in the route manifest at the same lean size as
+every sibling API route.
+
+---
+
 ## Local development
 
 ```bash

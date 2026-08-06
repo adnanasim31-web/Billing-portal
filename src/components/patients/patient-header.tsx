@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Pencil } from "lucide-react";
+import { FileText, Pencil } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,12 +48,20 @@ export function PatientHeader(props: PatientHeaderProps) {
           </p>
         </div>
       </div>
-      <Button variant="outline" asChild>
-        <Link href={`/patients/${props.id}/edit`}>
-          <Pencil className="h-4 w-4" />
-          Edit patient
-        </Link>
-      </Button>
+      <div className="flex gap-2">
+        <Button variant="outline" asChild>
+          <Link href={`/patients/${props.id}/statement`}>
+            <FileText className="h-4 w-4" />
+            Statement
+          </Link>
+        </Button>
+        <Button variant="outline" asChild>
+          <Link href={`/patients/${props.id}/edit`}>
+            <Pencil className="h-4 w-4" />
+            Edit patient
+          </Link>
+        </Button>
+      </div>
     </div>
   );
 }

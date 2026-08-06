@@ -6,6 +6,8 @@ import { getCurrentUser, hasPermission } from "@/lib/services/current-user-servi
 import { getClaimById, scrubClaimById } from "@/lib/services/claim-service";
 import { listPaymentsForClaim } from "@/lib/services/payment-service";
 import { listArNotesForClaim } from "@/lib/services/ar-service";
+import { listAdjustmentsForClaim } from "@/lib/services/claim-adjustment-service";
+import { computeLineRemainingBalance } from "@/lib/services/claim-adjustment-logic";
 import { PERMISSIONS } from "@/lib/constants/permissions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +19,7 @@ import { ClaimDiagnosesSection } from "@/components/claims/claim-diagnoses-secti
 import { ClaimLinesSection } from "@/components/claims/claim-lines-section";
 import { ClaimScrubPanel } from "@/components/claims/claim-scrub-panel";
 import { ClaimStatusHistoryTimeline } from "@/components/claims/claim-status-history";
+import { ClaimAdjustmentsSection } from "@/components/claims/claim-adjustments-section";
 import { PAYMENT_METHOD_LABELS } from "@/components/payments/payments-table";
 import { ClaimCollectionsSection } from "@/components/ar/claim-collections-section";
 import type { ClaimStatus } from "@/types/database.types";
@@ -49,11 +52,12 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
 
   const { id } = await params;
   const canViewAr = hasPermission(user, PERMISSIONS.AR_VIEW);
-  const [detail, scrubResult, payments, arNotes] = await Promise.all([
+  const [detail, scrubResult, payments, arNotes, adjustments] = await Promise.all([
     getClaimById(id, user.organizationId),
     scrubClaimById(id, user.organizationId).catch(() => null),
     listPaymentsForClaim(id, user.organizationId),
     canViewAr ? listArNotesForClaim(id, user.organizationId) : Promise.resolve([]),
+    listAdjustmentsForClaim(id, user.organizationId),
   ]);
   if (!detail) notFound();
 
@@ -230,6 +234,33 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
           )}
         </CardContent>
       </Card>
+
+      {!["draft", "ready"].includes(claim.status) && (
+        <ClaimAdjustmentsSection
+          claimId={claim.id}
+          canManage={hasPermission(user, PERMISSIONS.PAYMENTS_POST)}
+          lines={lineRows.map((l) => ({
+            id: l.id,
+            lineNumber: l.lineNumber,
+            procedureCode: l.procedureCode,
+            remainingBalance: computeLineRemainingBalance({
+              chargeAmount: l.chargeAmount,
+              paidAmount: l.paidAmount,
+              adjustmentAmount: l.adjustmentAmount,
+            }),
+          }))}
+          adjustments={adjustments.map((a) => ({
+            id: a.id,
+            lineNumber: a.claim_lines?.line_number ?? 0,
+            procedureCode: a.claim_lines?.procedure_code ?? "",
+            amount: Number(a.amount),
+            category: a.category,
+            notes: a.notes,
+            createdByName: a.profiles ? `${a.profiles.first_name} ${a.profiles.last_name}` : "Unknown",
+            createdAt: a.created_at,
+          }))}
+        />
+      )}
 
       {canViewAr && !["draft", "ready"].includes(claim.status) && (
         <ClaimCollectionsSection

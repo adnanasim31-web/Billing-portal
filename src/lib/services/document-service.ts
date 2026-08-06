@@ -3,7 +3,7 @@ import { randomUUID } from "crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { recordAuditLog } from "@/lib/services/audit-service";
 import type { DocumentMetaInput } from "@/lib/validations/documents";
-import type { OrgDocumentCategory } from "@/types/database.types";
+import type { OrgDocumentCategory, OrgDocumentEntityType } from "@/types/database.types";
 
 export const ORGANIZATION_DOCUMENTS_BUCKET = "organization-documents";
 const SIGNED_URL_TTL_SECONDS = 60 * 5;
@@ -26,6 +26,8 @@ export interface ListDocumentsParams {
   organizationId: string;
   query?: string;
   category?: OrgDocumentCategory | "all";
+  entityType?: OrgDocumentEntityType;
+  entityId?: string;
   page?: number;
   pageSize?: number;
 }
@@ -50,13 +52,23 @@ export async function listDocuments(params: ListDocumentsParams) {
   if (params.query) {
     queryBuilder = queryBuilder.ilike("file_name", `%${params.query.trim()}%`);
   }
+  if (params.entityType) {
+    queryBuilder = queryBuilder.eq("entity_type", params.entityType);
+  }
+  if (params.entityId) {
+    queryBuilder = queryBuilder.eq("entity_id", params.entityId);
+  }
 
   const { data, error, count } = await queryBuilder.range(from, to);
   if (error) throw error;
   return { documents: data, total: count ?? 0, page, pageSize };
 }
 
-export async function createDocument(params: { organizationId: string; uploadedBy: string; input: DocumentMetaInput }) {
+export async function createDocument(params: {
+  organizationId: string;
+  uploadedBy: string | null;
+  input: DocumentMetaInput;
+}) {
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("documents")
@@ -150,7 +162,11 @@ export async function getSignedDownloadUrl(filePath: string) {
   return data.signedUrl;
 }
 
-export async function deleteDocument(params: { documentId: string; organizationId: string; actingUserId: string }) {
+export async function deleteDocument(params: {
+  documentId: string;
+  organizationId: string;
+  actingUserId: string | null;
+}) {
   const admin = createAdminClient();
   const { data: doc, error: fetchError } = await admin
     .from("documents")

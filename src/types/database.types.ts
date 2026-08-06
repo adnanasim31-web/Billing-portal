@@ -49,6 +49,13 @@ export type ClaimStatus =
   | "paid"
   | "appealed"
   | "closed";
+export type ClaimAdjustmentCategory =
+  | "write_off"
+  | "contractual"
+  | "financial_hardship"
+  | "courtesy"
+  | "correction"
+  | "other";
 export type EligibilityServiceType =
   | "general"
   | "specialist"
@@ -1005,6 +1012,49 @@ export interface Database {
         };
         Update: Partial<Database["public"]["Tables"]["claim_lines"]["Row"]>;
       };
+      claim_adjustments: {
+        Row: {
+          id: string;
+          organization_id: string;
+          claim_id: string;
+          claim_line_id: string;
+          amount: number;
+          category: ClaimAdjustmentCategory;
+          notes: string | null;
+          created_by: string | null;
+          created_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "claim_adjustments_claim_id_fkey";
+            columns: ["claim_id"];
+            isOneToOne: false;
+            referencedRelation: "claims";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "claim_adjustments_claim_line_id_fkey";
+            columns: ["claim_line_id"];
+            isOneToOne: false;
+            referencedRelation: "claim_lines";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "claim_adjustments_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["claim_adjustments"]["Row"]> & {
+          organization_id: string;
+          claim_id: string;
+          claim_line_id: string;
+          amount: number;
+        };
+        Update: Partial<Database["public"]["Tables"]["claim_adjustments"]["Row"]>;
+      };
       claim_status_history: {
         Row: {
           id: string;
@@ -1242,6 +1292,7 @@ export interface Database {
           notes: string | null;
           created_by: string | null;
           updated_by: string | null;
+          expiration_notified_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -1550,6 +1601,83 @@ export interface Database {
           email: string;
         };
         Update: Partial<Database["public"]["Tables"]["patient_portal_accounts"]["Row"]>;
+      };
+      provider_portal_accounts: {
+        Row: {
+          id: string;
+          organization_id: string;
+          provider_id: string;
+          email: string;
+          set_by: string | null;
+          last_login_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "provider_portal_accounts_provider_id_fkey";
+            columns: ["provider_id"];
+            isOneToOne: true;
+            referencedRelation: "providers";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "provider_portal_accounts_set_by_fkey";
+            columns: ["set_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["provider_portal_accounts"]["Row"]> & {
+          id: string;
+          organization_id: string;
+          provider_id: string;
+          email: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["provider_portal_accounts"]["Row"]>;
+      };
+      provider_messages: {
+        Row: {
+          id: string;
+          organization_id: string;
+          provider_id: string;
+          sender_type: "provider" | "staff";
+          sender_profile_id: string | null;
+          sender_provider_account_id: string | null;
+          body: string;
+          created_at: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "provider_messages_provider_id_fkey";
+            columns: ["provider_id"];
+            isOneToOne: false;
+            referencedRelation: "providers";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "provider_messages_sender_profile_id_fkey";
+            columns: ["sender_profile_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "provider_messages_sender_provider_account_id_fkey";
+            columns: ["sender_provider_account_id"];
+            isOneToOne: false;
+            referencedRelation: "provider_portal_accounts";
+            referencedColumns: ["id"];
+          },
+        ];
+        Insert: Partial<Database["public"]["Tables"]["provider_messages"]["Row"]> & {
+          organization_id: string;
+          provider_id: string;
+          sender_type: "provider" | "staff";
+          body: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["provider_messages"]["Row"]>;
       };
     };
     Views: Record<string, never>;

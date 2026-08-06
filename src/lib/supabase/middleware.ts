@@ -18,6 +18,8 @@ const PORTAL_PUBLIC_ROUTES = [
   "/portal/reset-password",
 ];
 
+const PROVIDER_PUBLIC_ROUTES = ["/provider/login"];
+
 // Optional dedicated hostname for the patient portal (e.g. a second
 // *.vercel.app alias on the same project). When a request's Host header
 // matches this, "/" is treated as "/portal" so patients land straight in
@@ -30,14 +32,14 @@ const PATIENT_PORTAL_HOST = process.env.PATIENT_PORTAL_HOST ?? "";
  * unauthenticated users away from protected routes / authenticated users
  * away from auth routes. Called from the root middleware.ts.
  *
- * Staff and patient-portal accounts share one Supabase Auth session
- * mechanism but are two different "realms" (profiles vs
- * patient_portal_accounts) - /portal/* routes are handled separately from
- * staff routes so a lapsed patient session bounces to /portal/login (not
- * the staff /login), and a Supabase user from one realm never gets
- * force-redirected off the other realm's own login page, which would
- * otherwise loop against that page's own "not the right kind of account"
- * redirect.
+ * Staff, patient-portal, and provider-portal accounts share one Supabase
+ * Auth session mechanism but are three different "realms" (profiles vs
+ * patient_portal_accounts vs provider_portal_accounts) - /portal/* and
+ * /provider/* routes are each handled separately from staff routes so a
+ * lapsed session bounces to that realm's own login page (not the staff
+ * /login), and a Supabase user from one realm never gets force-redirected
+ * off another realm's own login page, which would otherwise loop against
+ * that page's own "not the right kind of account" redirect.
  */
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
@@ -117,6 +119,36 @@ export async function updateSession(request: NextRequest) {
       const rewriteUrl = request.nextUrl.clone();
       rewriteUrl.pathname = pathname;
       return NextResponse.rewrite(rewriteUrl);
+    }
+
+    return supabaseResponse;
+  }
+
+  if (pathname.startsWith("/provider")) {
+    const isProviderPublicRoute = PROVIDER_PUBLIC_ROUTES.some((route) => pathname.startsWith(route));
+
+    if (!user && !isProviderPublicRoute) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/provider/login";
+      return NextResponse.redirect(redirectUrl);
+    }
+
+    if (user && isProviderPublicRoute) {
+      // Only bounce away if this session is actually a provider portal
+      // account - a staff member who wandered onto /provider/login should
+      // just see the page, not get force-redirected in a loop against
+      // /provider's own "not a provider account" check.
+      const { data: providerAccount } = await supabase
+        .from("provider_portal_accounts")
+        .select("id")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (providerAccount) {
+        const redirectUrl = request.nextUrl.clone();
+        redirectUrl.pathname = "/provider";
+        redirectUrl.search = "";
+        return NextResponse.redirect(redirectUrl);
+      }
     }
 
     return supabaseResponse;

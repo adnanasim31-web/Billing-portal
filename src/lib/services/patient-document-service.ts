@@ -47,7 +47,7 @@ export async function listPatientDocuments(patientId: string, organizationId: st
 export async function recordPatientDocument(params: {
   patientId: string;
   organizationId: string;
-  uploadedBy: string;
+  uploadedBy: string | null;
   input: PatientDocumentMetaInput;
 }) {
   const admin = createAdminClient();

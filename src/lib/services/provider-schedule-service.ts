@@ -20,7 +20,7 @@ export async function listProviderSchedule(providerId: string, organizationId: s
 export async function addProviderScheduleBlock(params: {
   providerId: string;
   organizationId: string;
-  actingUserId: string;
+  actingUserId: string | null;
   input: ProviderScheduleInput;
 }) {
   const admin = createAdminClient();
@@ -53,7 +53,7 @@ export async function addProviderScheduleBlock(params: {
 export async function deleteProviderScheduleBlock(params: {
   scheduleId: string;
   organizationId: string;
-  actingUserId: string;
+  actingUserId: string | null;
 }) {
   const admin = createAdminClient();
   const { data: block, error: fetchError } = await admin

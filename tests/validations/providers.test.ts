@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { providerSchema, providerScheduleSchema } from "@/lib/validations/providers";
+import { providerPortalCredentialsSchema, providerSchema, providerScheduleSchema } from "@/lib/validations/providers";
 
 describe("providerSchema", () => {
   const baseIndividual = {
@@ -79,6 +79,30 @@ describe("providerScheduleSchema", () => {
 
   it("rejects a day of week outside 0-6", () => {
     const result = providerScheduleSchema.safeParse({ dayOfWeek: 7, startTime: "09:00", endTime: "17:00" });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("providerPortalCredentialsSchema", () => {
+  it("accepts both fields blank - no portal access being set up", () => {
+    expect(providerPortalCredentialsSchema.safeParse({ email: "", password: "" }).success).toBe(true);
+  });
+
+  it("accepts a valid email and strong password", () => {
+    const result = providerPortalCredentialsSchema.safeParse({
+      email: "dr.clark@example.com",
+      password: "Str0ng!Passw0rd",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects an invalid email", () => {
+    const result = providerPortalCredentialsSchema.safeParse({ email: "not-an-email", password: "" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a weak password", () => {
+    const result = providerPortalCredentialsSchema.safeParse({ email: "", password: "short" });
     expect(result.success).toBe(false);
   });
 });

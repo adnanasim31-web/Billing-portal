@@ -3,8 +3,9 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentPortalUser, getPortalPaymentReceipt } from "@/lib/services/patient-portal-service";
-import { PortalReceiptPrintButton } from "@/components/portal/portal-receipt-print-button";
+import { PrintButton } from "@/components/shared/print-button";
 import { PAYMENT_METHOD_LABELS } from "@/components/payments/payments-table";
+import { formatAddressLines } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Payment Receipt" };
 
@@ -17,23 +18,6 @@ function resolveProviderName(
   return provider.provider_type === "organization"
     ? (provider.organization_name ?? "Unknown provider")
     : `${provider.first_name ?? ""} ${provider.last_name ?? ""}`.trim();
-}
-
-function formatAddress(entity: {
-  address_line1: string | null;
-  address_line2: string | null;
-  city: string | null;
-  state: string | null;
-  postal_code: string | null;
-}): string[] {
-  const lines: string[] = [];
-  if (entity.address_line1) lines.push(entity.address_line1);
-  if (entity.address_line2) lines.push(entity.address_line2);
-  const cityStateZip = [entity.city, [entity.state, entity.postal_code].filter(Boolean).join(" ")]
-    .filter(Boolean)
-    .join(", ");
-  if (cityStateZip) lines.push(cityStateZip);
-  return lines;
 }
 
 export default async function PortalPaymentReceiptPage({ params }: { params: Promise<{ id: string }> }) {
@@ -56,7 +40,7 @@ export default async function PortalPaymentReceiptPage({ params }: { params: Pro
           <ArrowLeft className="h-3.5 w-3.5" />
           Back to payment history
         </Link>
-        <PortalReceiptPrintButton />
+        <PrintButton />
       </div>
 
       <div className="rounded-lg border border-border bg-card p-8 print:border-none print:p-0">
@@ -64,7 +48,7 @@ export default async function PortalPaymentReceiptPage({ params }: { params: Pro
           <div>
             <h1 className="text-lg font-semibold tracking-tight">{organization?.name ?? "MedBill RCM Suite"}</h1>
             {organization &&
-              formatAddress(organization).map((line) => (
+              formatAddressLines(organization).map((line) => (
                 <p key={line} className="text-sm text-muted-foreground">
                   {line}
                 </p>
@@ -89,7 +73,7 @@ export default async function PortalPaymentReceiptPage({ params }: { params: Pro
               {patient ? `${patient.first_name} ${patient.last_name}` : "Patient"}
             </p>
             {patient &&
-              formatAddress(patient).map((line) => (
+              formatAddressLines(patient).map((line) => (
                 <p key={line} className="text-sm text-muted-foreground">
                   {line}
                 </p>
